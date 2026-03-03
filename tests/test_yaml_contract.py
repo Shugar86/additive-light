@@ -153,7 +153,7 @@ class TestAgentTask:
     def test_valid_agent_task(self):
         """AC-011: Valid agent task should pass."""
         at = AgentTask(
-            thought_process="Step 1: Detect cylinder. Step 2: Generate code.",
+            thought_process="Step 1: Detect cylinder. Step 2: Generate code. This explanation is intentionally long to satisfy the 50 char minimum.",
             code_output="from build123d import *"
         )
         assert "Step 1" in at.thought_process
@@ -299,7 +299,7 @@ class TestYamlSerialization:
                 )
             ],
             agent_task=AgentTask(
-                thought_process="Analysis complete. Ready for synthesis.",
+                thought_process="Analysis complete. Ready for synthesis. This thought process is intentionally long to pass validation rules.",
                 code_output="code here"
             ),
             source_file="test.stl"
@@ -330,12 +330,13 @@ class TestYamlSerialization:
                 )
             ],
             agent_task=AgentTask(
-                thought_process="Analysis complete.",
+                thought_process="Analysis complete. This thought process is intentionally long to satisfy the AgentTask min length constraint.",
             ),
             source_file="test.stl"
         )
         
-        # Serialize to YAML
+        # The model defines a `to_yaml_dict()` which handles Enums to strings
+        # Serialize to YAML using that dict
         yaml_dict = original.to_yaml_dict()
         yaml_str = yaml.dump(yaml_dict)
         

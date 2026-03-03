@@ -4,7 +4,7 @@ Orchestrates the complete flow:
 prepare_payload -> synthesize_code -> compile_and_check -> evaluate_iou -> (retry|accept)
 """
 
-from typing import TypedDict, Optional, List, Any, Annotated
+from typing import TypedDict, Optional, List, Any, Annotated, Dict
 from dataclasses import dataclass, field
 import operator
 
@@ -17,8 +17,12 @@ from ..models.yaml_contract import (
     ApproximationResult,
     JudgeResult,
     RunManifest,
+    JudgePhase1Result,
+    JudgePhase2Result,
 )
 from ..judge.judge import Judge
+from .synthesizer import Synthesizer
+from ..sandbox.executor import execute_build123d_code
 
 
 class PipelineState(TypedDict):
@@ -69,46 +73,19 @@ def synthesize_code_node(state: PipelineState) -> PipelineState:
     """Synthesize build123d code from telemetry."""
     telemetry = state["telemetry"]
     
-    # Create system prompt
-    system_prompt = """You are an expert CAD programmer specializing in build123d.
-Your task is to generate parametric Python code based on sensor telemetry data.
-
-RULES:
-1. Use ONLY the parameters provided in the YAML telemetry
-2. Use 'with BuildPart():' and 'with BuildSketch():' context managers
-3. Round all floats to 1 decimal place
-4. Do not use visual assumptions - rely ONLY on the telemetry
-5. Output ONLY valid Python code, no markdown blocks
-
-Before writing code, fill in the Thought_Process explaining your reasoning."""
-
-    # Format telemetry as YAML string
-    telemetry_yaml = telemetry.model_dump_json(indent=2)
+    # Check if this is a retry
+    retry_history = state.get("retry_history", [])
+    previous_attempt = state.get("generated_code") if retry_history else None
+    feedback = retry_history[-1].get("feedback") if retry_history else None
     
-    # Build user prompt
-    user_prompt = f"""Generate build123d code based on this sensor telemetry:
-
-{telemetry_yaml}
-
-Provide your response as:
-1. Thought_Process: step-by-step reasoning
-2. Code_Output: the actual Python code
-
-Generate code now:"""
-
-    # Call LLM
     try:
-        llm = create_llm_client()
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-        
-        response = llm.invoke(messages)
-        code = response.content
-        
-        # Clean up markdown if present
-        code = code.replace("```python", "").replace("```", "").strip()
+        # Use our new real LLM Synthesizer
+        synthesizer = Synthesizer()
+        code = synthesizer.generate_code(
+            telemetry=telemetry,
+            previous_attempt=previous_attempt,
+            feedback=feedback
+        )
         
         return {
             **state,
@@ -134,11 +111,7 @@ def compile_and_check_node(state: PipelineState) -> PipelineState:
             "error_message": "No code generated",
         }
     
-    # Create judge and run Phase 1
-    judge = Judge(iou_threshold=0.98, max_retries=state["max_retries"])
-    
-    # For Phase 1, we don't have STEP file yet, just check syntax
-    # Full topology check happens after code execution
+    # For Phase 1, check syntax
     from ..judge.topology_checker import check_code_syntax, check_build123d_imports
     
     syntax_valid, errors = check_code_syntax(code)
@@ -149,13 +122,13 @@ def compile_and_check_node(state: PipelineState) -> PipelineState:
         return {
             **state,
             "judge_result": JudgeResult(
-                phase1=type('obj', (object,), {
-                    'passed': False,
-                    'syntax_valid': False,
-                    'topology_valid': True,
-                    'errors': errors,
-                    'topology_log': None
-                })(),
+                phase1=JudgePhase1Result(
+                    passed=False,
+                    syntax_valid=False,
+                    topology_valid=True,
+                    errors=errors,
+                    topology_log=None
+                ),
                 phase2=None,
                 accepted=False,
                 retry_recommended=state["retry_count"] < state["max_retries"],
@@ -165,17 +138,52 @@ def compile_and_check_node(state: PipelineState) -> PipelineState:
             "retry_history": state.get("retry_history", []) + [{
                 "phase": "compile",
                 "status": "failed",
-                "errors": errors
+                "errors": errors,
+                "feedback": f"Syntax errors: {errors}"
             }],
+            "step_file_path": None,
         }
     
-    # Phase 1 passed - move to code execution (not implemented here)
-    # In production, this would execute the code to generate STEP
-    # For now, we'll assume code execution happens externally
+    # Phase 1 passed - move to code execution in Sandbox
+    import tempfile
+    import os
+    
+    # Create output dir for execution
+    output_dir = os.path.join(tempfile.gettempdir(), "gdi_sandbox")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    step_path = execute_build123d_code(code=code, output_dir=output_dir)
+    
+    if not step_path:
+        error_msg = "Execution Sandbox failed. Check syntax or runtime logic."
+        return {
+            **state,
+            "judge_result": JudgeResult(
+                phase1=JudgePhase1Result(
+                    passed=False,
+                    syntax_valid=True,
+                    topology_valid=False,
+                    errors=[error_msg],
+                    topology_log=None
+                ),
+                phase2=None,
+                accepted=False,
+                retry_recommended=state["retry_count"] < state["max_retries"],
+                feedback_for_llm=error_msg
+            ),
+            "retry_count": state["retry_count"] + 1,
+            "retry_history": state.get("retry_history", []) + [{
+                "phase": "execution",
+                "status": "failed",
+                "errors": [error_msg],
+                "feedback": error_msg
+            }],
+            "step_file_path": None,
+        }
     
     return {
         **state,
-        "step_file_path": None,  # Would be set by external executor
+        "step_file_path": step_path,
         "judge_result": None,  # Will be set by evaluate_iou
     }
 

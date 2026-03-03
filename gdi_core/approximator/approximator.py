@@ -137,6 +137,7 @@ class ZoneDetector:
         """Analyze a zone to determine its geometry and parameters.
         
         Uses RANSAC for robust fitting on noisy data.
+        Detects cross-section type via circularity before fitting.
         
         Args:
             slices: Slices belonging to this zone
@@ -148,7 +149,66 @@ class ZoneDetector:
             return None
         
         z_vals = np.array([s.z_height for s in slices])
+        zone_height = float(z_vals[-1] - z_vals[0])
         
+        # --- Cross-section type detection via circularity ---
+        # circularity = 4π·A/P²; perfect circle = 1.0, square ≈ 0.785
+        valid_slices = [s for s in slices if s.is_valid]
+        if valid_slices:
+            mean_circularity = float(np.mean([s.circularity for s in valid_slices]))
+        else:
+            mean_circularity = 1.0  # fallback to circular path
+        
+        CIRCULARITY_THRESHOLD = 0.85
+        
+        if mean_circularity <= CIRCULARITY_THRESHOLD:
+            # ---- RECTANGLE / POLYGON cross-section ----
+            # Use bounding-box dimensions averaged over zone slices
+            widths = np.array([s.bounding_box[2] - s.bounding_box[0] for s in valid_slices])
+            depths = np.array([s.bounding_box[3] - s.bounding_box[1] for s in valid_slices])
+            
+            mean_width = float(np.mean(widths))
+            mean_depth = float(np.mean(depths))
+            max_holes = max(s.num_holes for s in slices)
+            
+            if max_holes > 0:
+                geom = GeometryType.CONSTANT_PROFILE_WITH_HOLES
+                hint = (
+                    f"Rectangle cross-section detected (circularity={mean_circularity:.2f}). "
+                    f"Dims: {mean_width:.1f}x{mean_depth:.1f}mm, {max_holes} holes. "
+                    f"Use Box(width, depth, height) with PolarArray for holes."
+                )
+            else:
+                geom = GeometryType.CONSTANT_PROFILE
+                hint = (
+                    f"Rectangle cross-section detected (circularity={mean_circularity:.2f}). "
+                    f"Dims: {mean_width:.1f}x{mean_depth:.1f}mm. "
+                    f"Use Box(width, depth, height)."
+                )
+            
+            params = {
+                "width": mean_width,
+                "depth": mean_depth,
+                "height": zone_height,
+            }
+            if max_holes > 0:
+                params["hole_count"] = max_holes
+                
+            inliers = np.ones(len(widths), dtype=bool)
+            conf = compute_zone_confidence(widths, inliers, has_holes=max_holes > 0)
+            
+            return DetectedZone(
+                start_z=float(z_vals[0]),
+                end_z=float(z_vals[-1]),
+                geometry=geom,
+                cross_section=CrossSectionType.RECTANGLE,
+                params=params,
+                confidence=conf,
+                sensor_hint=hint
+            )
+
+        
+        # ---- CIRCLE / body-of-revolution path ----
         # Estimate radius from bounding box (for circular approximation)
         radii = np.array([
             (s.bounding_box[2] - s.bounding_box[0] + 
@@ -178,7 +238,7 @@ class ZoneDetector:
             
             params = {
                 "radius": mean_radius,
-                "height": float(z_vals[-1] - z_vals[0]),
+                "height": zone_height,
                 "hole_count": max_holes if max_holes > 0 else None,
                 "center": [0.0, 0.0]
             }

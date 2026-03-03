@@ -3,13 +3,14 @@
 Transforms raw LLM-generated code to engineering standards:
 - Extracts hardcoded values into named parameters
 - Beautifies dimensions (rounds to engineering standards)
-- Adds proper documentation
 """
 
 import re
 import ast
 from typing import Tuple, List, Dict, Any, Optional
 import logging
+import tokenize
+from io import StringIO
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,9 @@ def beautify_dimension(value: float) -> float:
     """Beautify a dimension value to engineering standards.
     
     Rounds to appropriate precision based on magnitude:
-    - Values < 1mm: round to 0.1mm
     - Values < 10mm: round to 0.1mm or nearest 0.5mm
     - Values < 100mm: round to nearest 0.5mm or integer
     - Values >= 100mm: round to nearest integer
-    
     Args:
         value: Raw dimension value
         
@@ -63,12 +62,12 @@ def parametrize_code(code: str) -> Tuple[str, List[str]]:
     # Find all numeric literals in the code
     # Pattern: function calls with numeric arguments
     
-    param_names = []
+    param_data = [] # Stores (name, value) tuples
     param_counter = {}
     
     def replace_with_param(match: re.Match) -> str:
         """Replace a numeric literal with a parameter reference."""
-        nonlocal param_counter, param_names
+        nonlocal param_counter, param_data
         
         prefix = match.group(1)
         value_str = match.group(2)
@@ -101,7 +100,7 @@ def parametrize_code(code: str) -> Tuple[str, List[str]]:
             param_counter[param_name] = 1
             full_name = param_name
         
-        param_names.append(full_name)
+        param_data.append((full_name, value))
         
         return f"{prefix}{full_name}{suffix}"
     
@@ -112,19 +111,18 @@ def parametrize_code(code: str) -> Tuple[str, List[str]]:
     refactored = re.sub(pattern, replace_with_param, code)
     
     # Now add parameter definitions at the top
-    if param_names:
+    param_names_list = [name for name, _ in param_data]
+    if param_data:
         param_lines = ["# Extracted Parameters"]
-        seen = set()
-        for name in param_names:
-            if name not in seen:
-                seen.add(name)
-                # Find the value from the original code
-                # This is a simplified approach
-                param_lines.append(f"{name} = 10.0  # TODO: Extract actual value")
+        seen_names = set()
+        for name, value in param_data:
+            if name not in seen_names:
+                seen_names.add(name)
+                param_lines.append(f"{name} = {value}")
         
         refactored = "\n".join(param_lines) + "\n\n" + refactored
     
-    return refactored, param_names
+    return refactored, param_names_list
 
 
 def beautify_code(code: str) -> str:
@@ -136,31 +134,25 @@ def beautify_code(code: str) -> str:
     Returns:
         Beautified code
     """
-    # Find all numeric literals and beautify them
+    # Use tokenize to safely process numbers, skipping comments and strings
     
-    def beautify_match(match: re.Match) -> str:
-        """Replace a numeric literal with beautified version."""
-        prefix = match.group(1)
-        value_str = match.group(2)
-        suffix = match.group(3)
-        
-        try:
-            value = float(value_str)
-        except ValueError:
-            return match.group(0)
-        
-        beautified = beautify_dimension(value)
-        
-        return f"{prefix}{beautified}{suffix}"
+    result_tokens = []
+    g = tokenize.generate_tokens(StringIO(code).readline)
     
-    # Pattern to find numeric literals
-    pattern = r'(\D)(\d+\.?\d*)(\D)'
-    
-    # Apply beautification (multiple passes for nested values)
-    for _ in range(3):
-        code = re.sub(pattern, beautify_match, code)
-    
-    return code
+    for toknum, tokval, (srow, scol), (erow, ecol), line in g:
+        if toknum == tokenize.NUMBER:
+            try:
+                # Attempt to convert to float, then beautify
+                value = float(tokval)
+                beautified_value = beautify_dimension(value)
+                result_tokens.append(str(beautified_value))
+            except ValueError:
+                # If it's not a simple float (e.g., complex number), keep as is
+                result_tokens.append(tokval)
+        else:
+            result_tokens.append(tokval)
+            
+    return "".join(result_tokens)
 
 
 class Optimizer:

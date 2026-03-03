@@ -43,47 +43,11 @@ class CAMExporter:
         Returns:
             True if successful
         """
-        logger.info(f"Generating G-code for {step_file}")
-        
-        try:
-            # Try to import FreeCAD
-            import FreeCAD
-            import Part
-            import Path
-            
-            # Load STEP file
-            doc = FreeCAD.newDocument()
-            Part.insert(step_file, doc.Name)
-            
-            # Get the part
-            part = doc.Objects[0]
-            
-            # Create a job
-            job = Path.Job.Create("Job", [part], None)
-            
-            # Set postprocessor
-            job.PostProcessor = self.postprocessor
-            
-            # Add operations (simplified - would add proper facing, profiling, etc.)
-            # This is a placeholder - real implementation would add proper toolpaths
-            
-            # Post-process
-            gcode = job.PostProcessorOutput
-            
-            # Write G-code
-            with open(output_nc, "w") as f:
-                f.write(gcode)
-            
-            logger.info(f"G-code saved to {output_nc}")
-            return True
-            
-        except ImportError:
-            logger.warning("FreeCAD not available, skipping G-code generation")
-            return False
-            
-        except Exception as e:
-            logger.error(f"CAM generation failed: {e}")
-            return False
+        logger.warning(
+            "CAM phase bypassed: FreeCAD Path not integrated in this sprint. "
+            "Skipping G-code generation — STEP/Code output is the final artifact."
+        )
+        return False
     
     def generate_simple_gcode(
         self,

@@ -7,8 +7,9 @@ import numpy as np
 import trimesh
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict, Any
+import math
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class SliceMetrics:
     perimeter: float
     num_holes: int
     is_valid: bool
+    circularity: float = 0.0  # 4π·A/P² — 1.0 for perfect circle, <0.85 → rectangle-like
     polygon: Optional[Polygon] = None
 
 
@@ -148,14 +150,24 @@ class Sensor:
         
         bounds = main_poly.bounds
         
+        # Compute circularity: 4π·A/P² (perfect circle = 1.0, square ≈ 0.785)
+        perimeter_val = float(main_poly.length)
+        area_val = float(main_poly.area)
+        if perimeter_val > 1e-9:
+            circularity = (4.0 * math.pi * area_val) / (perimeter_val ** 2)
+        else:
+            circularity = 0.0
+        circularity = float(min(1.0, max(0.0, circularity)))  # clamp to [0, 1]
+        
         return SliceMetrics(
             z_height=z_height,
-            area=float(main_poly.area),
+            area=area_val,
             centroid=(float(main_poly.centroid.x), float(main_poly.centroid.y)),
             bounding_box=(float(bounds[0]), float(bounds[1]), float(bounds[2]), float(bounds[3])),
-            perimeter=float(main_poly.length),
+            perimeter=perimeter_val,
             num_holes=num_holes,
             is_valid=True,
+            circularity=circularity,
             polygon=main_poly
         )
     
