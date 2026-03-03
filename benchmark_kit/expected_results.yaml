@@ -1,0 +1,284 @@
+# =============================================================================
+# GDI Benchmark Kit: Expected Results (Контрольные ожидаемые результаты)
+# =============================================================================
+# Формат: для каждой модели фиксируем:
+#   - expected_zones: что Approximator ОБЯЗАН распознать
+#   - expected_params: ключевые параметры с допуском
+#   - min_iou: минимальный порог совпадения при IoU-сравнении
+#   - confidence_floor: минимальный confidence который Approximator должен вернуть
+# =============================================================================
+
+# --- ИДЕАЛЬНЫЕ МОДЕЛИ (ideal/) -----------------------------------------------
+
+ideal_cylinder:
+  file: ideal/ideal_cylinder.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 20.0
+        tolerance_mm: 0.2
+        height: 40.0
+  min_iou: 0.99
+  confidence_floor: 0.95
+  notes: "Базовая проверка: самый простой случай. Если цилиндр не распознается, пайплайн неработоспособен."
+
+ideal_stepped_shaft:
+  file: ideal/ideal_stepped_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 15.0
+        tolerance_mm: 0.2
+        span_z: [0.0, 20.0]
+    - zone_id: 2
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 10.0
+        tolerance_mm: 0.2
+        span_z: [20.0, 50.0]
+  min_iou: 0.99
+  confidence_floor: 0.92
+  notes: "Проверка сегментации зон. Граница ступени должна быть определена с точностью +/-0.5мм."
+
+ideal_flange:
+  file: ideal/ideal_flange.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Circle
+      params:
+        outer_radius: 30.0
+        tolerance_mm: 0.2
+        height: 10.0
+        hole_count: 4
+        hole_radius: 3.0
+        hole_pitch_radius: 22.0
+  min_iou: 0.98
+  confidence_floor: 0.90
+  notes: "Проверка детектирования внутренних контуров (PolarArray). Все 4 отверстия должны быть найдены."
+
+ideal_bracket_2.5d:
+  file: ideal/ideal_bracket_2.5d.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Rectangle
+      params:
+        width: 60.0
+        depth: 40.0
+        height: 10.0
+        tolerance_mm: 0.3
+        hole_count: 2
+        hole_radius: 5.0
+        pocket_radius: 15.0
+        pocket_depth: 5.0
+  min_iou: 0.97
+  confidence_floor: 0.88
+  notes: "Проверка 2.5D-детектирования. Тест на распознавание прямоугольного сечения, а не круглого."
+
+ideal_nema17_mount:
+  file: ideal/ideal_nema17_mount.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Rectangle
+      params:
+        width: 42.0
+        depth: 42.0
+        height: 5.0
+        tolerance_mm: 0.3
+        hole_count: 4         # 4 крепежных + 1 центральное
+        center_hole_radius: 11.5
+  min_iou: 0.96
+  confidence_floor: 0.85
+  notes: "Стандартизированная деталь. Проверяет, вернет ли система канонические размеры NEMA17."
+
+ideal_helical_gear:
+  file: ideal/ideal_helical_gear.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile  # Ожидаем распознавание как сложный профиль
+      cross_section: Complex
+      params:
+        bounding_radius: 14.0   # Приближенный внешний радиус
+        height: 20.0
+        tolerance_mm: 1.0       # Больший допуск для сложных форм
+  min_iou: 0.85
+  confidence_floor: 0.65
+  notes: "Граничный кейс. Пайплайн должен честно вернуть низкий confidence на форме, которую 2.7D-слайсер покрывает плохо. Это корректное поведение — отдать в ручной review."
+
+ideal_heat_sink:
+  file: ideal/ideal_heat_sink.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Rectangle
+      params:
+        width: 50.0
+        depth: 50.0
+        height: 18.0  # base=3 + fins=15
+        tolerance_mm: 0.5
+  min_iou: 0.90
+  confidence_floor: 0.70
+  notes: "Тест на тонкие ребра. Слайсер вернет сложный профиль, confidence будет умеренным — ожидаемо."
+
+ideal_lattice_block:
+  file: ideal/ideal_lattice_block.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile  # Ожидаем распознавание только bounding box
+      cross_section: Rectangle
+      params:
+        width: 20.0
+        depth: 20.0
+        height: 20.0
+        tolerance_mm: 1.0
+  min_iou: 0.70
+  confidence_floor: 0.50
+  notes: "Намеренно сложный кейс. Ожидаем confidence < 0.7 => автоматический fallback в ручной review. Так и должно работать."
+
+# --- ШУМНЫЕ МОДЕЛИ (noise/) --------------------------------------------------
+
+noise_cylinder:
+  file: noise/noise_cylinder.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 20.0
+        tolerance_mm: 0.5    # Больший допуск из-за шума
+  min_iou: 0.96
+  confidence_floor: 0.80
+  notes: "RANSAC должен отфильтровать шум и вернуть корректный радиус. Допуск расширен до ±0.5мм."
+
+noise_flange:
+  file: noise/noise_flange.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Circle
+      params:
+        outer_radius: 30.0
+        tolerance_mm: 0.8
+        hole_count: 4
+        hole_radius: 3.0
+        hole_pitch_radius: 22.0
+  min_iou: 0.93
+  confidence_floor: 0.72
+  notes: "Ключевой тест: все 4 отверстия должны быть найдены даже при наличии шума. Если hole_count < 4, RANSAC слишком агрессивен."
+
+noise_stepped_shaft:
+  file: noise/noise_stepped_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 15.0
+        tolerance_mm: 0.8
+        span_z: [0.0, 20.0]
+    - zone_id: 2
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 10.0
+        tolerance_mm: 0.8
+        span_z: [20.0, 50.0]
+  min_iou: 0.92
+  confidence_floor: 0.70
+  notes: "Граница ступени может быть определена с погрешностью до ±2мм из-за шума и наклона. Допустимо."
+
+noise_bracket_2.5d:
+  file: noise/noise_bracket_2.5d.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Rectangle
+      params:
+        width: 60.0
+        depth: 40.0
+        height: 10.0
+        tolerance_mm: 1.0
+  min_iou: 0.88
+  confidence_floor: 0.65
+
+# --- ПОВРЕЖДЕННЫЕ МОДЕЛИ (corrupt/) ------------------------------------------
+# Задача: пайплайн НЕ должен падать. Должен выдать результат с низким confidence
+# и чёткий диагностический лог о том, каких данных не хватает.
+
+corrupt_cylinder:
+  file: corrupt/corrupt_cylinder.stl_B_B.stl
+  expected_behavior: partial_recognition
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 20.0
+        tolerance_mm: 2.0    # Очень широкий допуск — деталь обрезана
+  min_iou: 0.80            # Порог снижен — деталь неполная
+  confidence_floor: 0.40   # Ожидаем низкий confidence
+  notes: "Критический тест на robustness. Пайплайн ОБЯЗАН вернуть результат, а не Exception. Если confidence < 0.5 — fallback в ручной review, это правильно."
+
+corrupt_flange:
+  file: corrupt/corrupt_flange.stl_B_A.stl
+  expected_behavior: partial_recognition
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile_with_Holes
+      cross_section: Circle
+      params:
+        outer_radius: 30.0
+        tolerance_mm: 2.0
+        hole_count: 3        # Может распознать только 3 из 4 (одно срезано)
+  min_iou: 0.75
+  confidence_floor: 0.35
+  notes: "Ожидаем частичное распознавание. Ключевая проверка: счетчик отверстий с пометкой 'minimum detected' — не жёсткое значение."
+
+corrupt_stepped_shaft:
+  file: corrupt/corrupt_stepped_shaft.3mf  # 3MF-формат тоже поддерживаем через Trimesh
+  expected_behavior: partial_recognition
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params:
+        radius: 15.0
+        tolerance_mm: 2.0
+  min_iou: 0.70
+  confidence_floor: 0.30
+  notes: "Тест на .3mf формат. Также проверяет, что вторая ступень может быть не распознана из-за обрезки."
+
+# --- РЕАЛЬНЫЕ СКАНЫ (real_scans/) -------------------------------------------
+# Эти модели не имеют жестких ожидаемых параметров (источник неизвестен).
+# Задача: пайплайн НЕ должен падать, должен выдать разумный YAML.
+
+real_ugolek:
+  file: real_scans/УГОЛОК.stl
+  expected_behavior: best_effort
+  expected_zones:
+    - geometry: Constant_Profile
+      cross_section: L_Profile  # Угловой профиль
+  confidence_floor: 0.40
+  notes: "Реальный скан угловой детали. Ожидаем L-образный профиль. Пайплайн должен не упасть."
+
+real_scan_1:
+  file: real_scans/mesh_Scan 1.stl
+  expected_behavior: best_effort
+  confidence_floor: 0.30
+  notes: "Боевой скан неизвестной детали. Цель — убедиться что RANSAC не вылетает с исключением."
+
+real_button:
+  file: real_scans/Кнопка_2.stl
+  expected_behavior: best_effort
+  expected_zones:
+    - geometry: Constant_Profile
+      cross_section: Circle  # Скорее всего кнопка — тело вращения
+  confidence_floor: 0.50
+  notes: "Кнопка — вероятно тело вращения. Хороший тест для Sensor."

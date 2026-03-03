@@ -1,0 +1,18 @@
+{
+  "run_id": "a940926f-e7d8-49aa-9edd-c1bf85bfa5e4",
+  "timestamp": "2026-03-03T13:58:35.209225",
+  "yaml_schema_version": "1.0",
+  "prompt_version": "1.0",
+  "source_stl": "benchmark_kit/ideal/ideal_cylinder.stl",
+  "output_yaml": null,
+  "output_step": null,
+  "output_nc": null,
+  "approximation_result": null,
+  "judge_result": null,
+  "final_iou": null,
+  "final_code": null,
+  "retry_count": 0,
+  "retry_history": [],
+  "status": "failure",
+  "error_log": "name 'Dict' is not defined"
+}

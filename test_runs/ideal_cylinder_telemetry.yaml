@@ -1,0 +1,48 @@
+agent_task:
+  rules:
+  - Do not use visual assumptions. Rely ONLY on the Parameters above.
+  - Use 'with BuildPart():' and 'with BuildSketch():' context managers.
+  - Round floats to 1 decimal place (Beautification).
+  thought_process: '# Approximator Analysis:
+
+    # Zone 1 (0.1 to 39.7 mm):
+
+    #   - Geometry: Constant_Profile
+
+    #   - Cross-section: Circle
+
+    #   - Confidence: 1.00
+
+    #   - Radius: 20.00 mm
+
+    #
+
+    # Build strategy:
+
+    # 1. Zone 1: Cylinder R=20.0, H=39.6'
+generated_at: '2026-03-03T13:58:35.940525'
+global_state:
+  base_axis: Z
+  target_action: Generate parametric B-Rep code
+  target_library: build123d
+  total_height: 39.7
+  yaml_version: '1.0'
+source_file: benchmark_kit/ideal/ideal_cylinder.stl
+topological_zones:
+- confidence: 1.0
+  cross_section: !!python/object/apply:gdi_core.models.yaml_contract.CrossSectionType
+  - Circle
+  geometry: !!python/object/apply:gdi_core.models.yaml_contract.GeometryType
+  - Constant_Profile
+  parameters:
+    center:
+    - 0.0
+    - 0.0
+    height: 39.6
+    radius: 20.0
+  sensor_hint: Stable RANSAC fit. Probably a base cylinder. Suggest beautification
+    to R=20.0.
+  span_z:
+  - 0.1
+  - 39.7
+  zone_id: 1

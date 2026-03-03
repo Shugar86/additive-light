@@ -1,0 +1,64 @@
+# ИНСТРУКЦИЯ ПО РАЗВЕРТЫВАНИЮ ADDITIVE LIGHT НА VDS (2.56.122.249)
+
+## 1. Подключение к серверу
+
+ssh root@2.56.122.249
+(введите пароль при запросе)
+
+## 2. Установка Nginx и Certbot (SSL)
+
+sudo apt update
+sudo apt install nginx certbot python3-certbot-nginx -y
+
+## 3. Настройка Nginx
+
+# Создаем папку для сайта
+sudo mkdir -p /var/www/additivelab.online
+
+# Создаем файл конфигурации (скопируйте содержимое nginx_additivelab.conf в этот файл)
+sudo nano /etc/nginx/sites-available/additivelab.online
+
+# Вставьте содержимое файла nginx_additivelab.conf, затем нажмите Ctrl+O (Save), Enter, Ctrl+X (Exit)
+
+# Активируем сайт
+sudo ln -s /etc/nginx/sites-available/additivelab.online /etc/nginx/sites-enabled/
+sudo rm /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+
+## 4. Настройка SSL (HTTPS)
+
+# Запускаем мастер настройки сертификатов
+sudo certbot --nginx -d additivelab.online -d www.additivelab.online
+
+# Следуйте инструкциям на экране (введите email, согласитесь с условиями)
+# Certbot автоматически обновит конфигурацию Nginx для использования HTTPS
+
+## 5. Загрузка файлов
+
+Вам нужно загрузить файлы из папки проекта (E:\additive-light\) в папку /var/www/additivelab.online на сервере.
+
+Список файлов для загрузки:
+- index.html
+- script.js
+- style.css
+- worker.js
+- openscad.wasm
+- openscad.min.js
+
+Вы можете использовать программу WinSCP или команду scp (в терминале Windows):
+
+scp index.html script.js style.css worker.js openscad.wasm openscad.min.js root@2.56.122.249:/var/www/additivelab.online
+
+## 6. Права доступа
+
+После загрузки файлов выполните на сервере:
+
+sudo chown -R www-data:www-data /var/www/additivelab.online
+sudo chmod -R 755 /var/www/additivelab.online
+
+## 7. Проверка
+
+Откройте https://additivelab.online в браузере.
+Проверьте консоль разработчика (F12) на наличие ошибок.
+Должно появиться сообщение "✅ Worker ready" и 3D просмотрщик должен работать.
