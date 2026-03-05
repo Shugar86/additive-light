@@ -1,0 +1,18 @@
+#!/bin/bash
+# Защита веток от случайного прямого push
+# Устанавливается командой: bash .github/install_hooks.sh
+
+protected_branches=("main" "develop")
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+for protected in "${protected_branches[@]}"; do
+    if [ "$current_branch" == "$protected" ]; then
+        echo -e "\n🚨 \033[1;31mОШИБКА: Прямой push в ветку '$current_branch' запрещен!\033[0m"
+        echo -e "👉 Пожалуйста, сделай новую ветку и открой Pull Request:"
+        echo -e "   git checkout -b feature/твое-имя-задачи"
+        echo -e "   git push -u origin feature/твое-имя-задачи\n"
+        exit 1
+    fi
+done
+
+exit 0

@@ -132,7 +132,6 @@ git rebase develop
 git config user.name "ТвойНикнейм"
 git config user.email "твой@email.com"
 
-# Настрой upstream для develop
-git checkout develop
-git push -u origin develop
+# Защита от случайных пушей в main/develop
+bash .github/install_hooks.sh
 ```
