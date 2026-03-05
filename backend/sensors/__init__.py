@@ -1,0 +1,1 @@
+"""Deterministic sensor tools for geometric analysis."""

@@ -1,0 +1,83 @@
+agent_id: judge
+role: judge
+objective: |
+  Compare the generated B-Rep model against the original STL mesh using
+  geometric distance metrics (Chamfer, Hausdorff). Determine if the
+  reconstruction is acceptable or needs refinement.
+  
+  The Judge acts as the quality gate and triggers the reflection loop
+  when errors are detected.
+
+planning_style: sequential
+version: "1.0.0"
+enabled: true
+tags:
+  - validation
+  - geometric_comparison
+  - quality_control
+
+input_contract:
+  required_fields:
+    - stl_path
+    - final_mesh_path
+  optional_fields:
+    - chamfer_distance
+    - hausdorff_distance
+  field_types:
+    stl_path: "str"
+    final_mesh_path: "Optional[str]"
+  preconditions:
+    - "Original STL must exist"
+    - "Generated mesh must exist if comparison is needed"
+
+output_contract:
+  required_fields:
+    - passed
+    - errors
+  optional_fields:
+    - chamfer_distance
+    - hausdorff_distance
+  field_types:
+    passed: "bool"
+    errors: "List[Dict]"
+    chamfer_distance: "Optional[float]"
+    hausdorff_distance: "Optional[float]"
+  postconditions:
+    - "passed=true if no errors and distances within tolerance"
+    - "errors must contain descriptions of geometric mismatches"
+
+allowed_tools:
+  - chamfer_calculator
+  - hausdorff_calculator
+  - mesh_sampler
+
+tool_configs:
+  chamfer_calculator:
+    enabled: true
+    timeout_seconds: 30.0
+    fallback_behavior: "error"
+  hausdorff_calculator:
+    enabled: true
+    timeout_seconds: 60.0
+    fallback_behavior: "skip"
+
+failure_policy:
+  on_execution_error: "retry"
+  on_validation_error: "fail"
+  on_missing_evidence: "skip"
+  on_timeout: "escalate"
+
+retry_policy:
+  max_retries: 1
+  backoff_strategy: "fixed"
+  initial_delay_seconds: 1.0
+  max_delay_seconds: 5.0
+
+escalation_policy:
+  enabled: true
+  escalation_target: null
+  escalation_conditions:
+    - "comparison failed after retries"
+  max_escalation_depth: 1
+
+prompt_rules: []

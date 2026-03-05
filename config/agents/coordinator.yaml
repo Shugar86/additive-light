@@ -1,0 +1,98 @@
+agent_id: coordinator
+role: coordinator
+objective: |
+  Analyze sensor reports from all axes, correlate 2D features into 3D features,
+  and create a step-by-step parametric construction plan for the Coder agent.
+  
+  The Coordinator acts as the "brain" of the swarm, performing spatial reasoning
+  to identify cylinders, holes, slots, and other mechanical features.
+
+planning_style: hierarchical
+version: "1.0.0"
+enabled: true
+tags:
+  - analysis
+  - planning
+  - feature_aggregation
+
+input_contract:
+  required_fields:
+    - sensor_reports
+    - stl_path
+  optional_fields:
+    - aligned_mesh_path
+    - max_iterations
+  field_types:
+    sensor_reports: "Dict[Axis, SliceReport]"
+    stl_path: "str"
+  preconditions:
+    - "At least one sensor report must be present"
+    - "STL file must exist and be readable"
+
+output_contract:
+  required_fields:
+    - features
+    - plan
+  field_types:
+    features: "List[Feature3D]"
+    plan: "List[BuildStep]"
+  postconditions:
+    - "All 3D features must have valid positions and dimensions"
+    - "Construction plan must be ordered logically (base -> details)"
+
+allowed_tools:
+  - feature_extractor
+  - spatial_correlator
+  - plan_optimizer
+
+tool_configs:
+  feature_extractor:
+    enabled: true
+    timeout_seconds: 30.0
+    fallback_behavior: "alternative"
+
+failure_policy:
+  on_execution_error: "retry"
+  on_validation_error: "repair"
+  on_missing_evidence: "request_more"
+  on_timeout: "escalate"
+
+retry_policy:
+  max_retries: 2
+  backoff_strategy: "exponential"
+  initial_delay_seconds: 1.0
+  max_delay_seconds: 10.0
+  retryable_errors:
+    - "Mesh loading failed"
+    - "Timeout"
+
+escalation_policy:
+  enabled: true
+  escalation_target: null
+  escalation_conditions:
+    - "max_retries exceeded"
+    - "critical validation error"
+  max_escalation_depth: 1
+
+prompt_rules:
+  - phase: analysis
+    template_key: coordinator_analysis
+    context_variables:
+      - sensor_reports
+      - identified_anomalies
+    priority: 10
+  
+  - phase: planning
+    template_key: coordinator_planning
+    context_variables:
+      - features_3d
+      - construction_constraints
+    priority: 5
+  
+  - phase: repair
+    template_key: coordinator_repair
+    context_variables:
+      - failed_plan
+      - error_feedback
+      - iteration_count
+    priority: 8

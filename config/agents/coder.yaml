@@ -1,0 +1,96 @@
+agent_id: coder
+role: coder
+objective: |
+  Generate clean, parametric Python code using the build123d library based on
+  the construction plan from the Coordinator. The code must be:
+  - Executable and safe (no forbidden imports)
+  - Well-structured with proper context managers
+  - Parameterized for easy modification
+  - Documented with clear comments
+
+planning_style: sequential
+version: "1.0.0"
+enabled: true
+tags:
+  - code_generation
+  - build123d
+  - parametric_cad
+
+input_contract:
+  required_fields:
+    - construction_plan
+    - identified_features
+  optional_fields:
+    - geometric_errors
+    - validation_errors
+    - iteration_count
+  field_types:
+    construction_plan: "List[BuildStep]"
+    identified_features: "List[Feature3D]"
+    geometric_errors: "List[Dict]"
+  preconditions:
+    - "Construction plan must not be empty"
+    - "All plan steps must have valid operations"
+
+output_contract:
+  required_fields:
+    - generated_code
+  field_types:
+    generated_code: "str"
+  postconditions:
+    - "Code must be valid Python syntax"
+    - "Code must import build123d"
+    - "Code must not contain forbidden imports"
+
+allowed_tools:
+  - template_generator
+  - llm_code_generator
+  - code_optimizer
+
+tool_configs:
+  template_generator:
+    enabled: true
+    fallback_behavior: "error"
+  llm_code_generator:
+    enabled: false
+    timeout_seconds: 60.0
+    fallback_behavior: "alternative"
+
+failure_policy:
+  on_execution_error: "retry"
+  on_validation_error: "repair"
+  on_missing_evidence: "infer"
+  on_timeout: "retry"
+
+retry_policy:
+  max_retries: 3
+  backoff_strategy: "fixed"
+  initial_delay_seconds: 0.5
+  max_delay_seconds: 5.0
+  retryable_errors:
+    - "Template generation failed"
+    - "Syntax error in generated code"
+
+escalation_policy:
+  enabled: false
+  escalation_target: null
+  escalation_conditions: []
+  max_escalation_depth: 0
+
+prompt_rules:
+  - phase: coding
+    template_key: coder_generation
+    context_variables:
+      - construction_plan
+      - identified_features
+      - parameters
+    priority: 10
+  
+  - phase: repair
+    template_key: coder_repair
+    context_variables:
+      - previous_code
+      - geometric_errors
+      - validation_errors
+      - iteration_count
+    priority: 8

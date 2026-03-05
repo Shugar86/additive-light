@@ -1,0 +1,64 @@
+# Swarm Policy Configuration
+# Defines global behavior, defaults, and agent registry
+
+# Default policies applied to all agents unless overridden
+default_retry_policy:
+  max_retries: 3
+  backoff_strategy: "exponential"
+  initial_delay_seconds: 1.0
+  max_delay_seconds: 30.0
+
+default_failure_policy:
+  on_execution_error: "retry"
+  on_validation_error: "repair"
+  on_missing_evidence: "request_more"
+  on_timeout: "escalate"
+
+# Pipeline configuration
+max_iterations: 3
+enable_reflection: true
+enable_parallel_sensors: true
+
+# Sensor configuration
+default_sensor_axes:
+  - "X"
+  - "Y"
+  - "Z"
+required_sensor_coverage: 0.8
+
+# Validation thresholds (stricter than agent defaults)
+chamfer_tolerance: 0.1
+hausdorff_tolerance: 0.5
+
+# Security policy
+allowed_imports:
+  - "build123d"
+  - "bd_warehouse"
+  - "ocp_vscode"
+  - "math"
+  - "numpy"
+  - "typing"
+
+forbidden_imports:
+  - "os"
+  - "sys"
+  - "subprocess"
+  - "socket"
+  - "requests"
+  - "urllib"
+  - "ftplib"
+  - "smtplib"
+
+max_code_execution_time: 60
+
+# Agent registry - maps roles to spec files
+# Paths are relative to config/agents/
+agent_specs:
+  coordinator: "coordinator.yaml"
+  coder: "coder.yaml"
+  judge: "judge.yaml"
+  sensor_x: "sensor_axis.yaml"
+  sensor_y: "sensor_axis.yaml"
+  sensor_z: "sensor_axis.yaml"
+  validator: "validator.yaml"
+  executor: "executor.yaml"

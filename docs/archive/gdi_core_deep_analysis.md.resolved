@@ -1,0 +1,252 @@
+# GDI Core — Детальный анализ (Senior++ / CAD Engineer)
+
+## Сводка
+
+| Метрика | Значение |
+|---------|----------|
+| **Исходных файлов** | 14 [.py](file:///c:/additive-light%20_dev/server.py) (без [__init__.py](file:///c:/additive-light%20_dev/gdi_app/__init__.py)) |
+| **Строк кода** | ~2 700 |
+| **Тестовых файлов** | 3 (test_yaml_contract, test_judge, test_quality_gates) |
+| **Тестов** | ~50 unit-test functions |
+| **Benchmark-моделей** | 15 STL (ideal × 8, noise × 4, corrupt × 3) + real_scans × 3 |
+| **Pydantic-моделей** | 10 (контракт v1.0) |
+
+---
+
+## Архитектура пайплайна
+
+```mermaid
+graph TD
+    STL["STL-файл"] --> A["Step 0: HumanAlign<br/>(alignment.py)"]
+    A --> B["Step 1: Sensor<br/>(sensor.py)"]
+    B -->|"List[SliceMetrics]"| C["Step 2: Approximator<br/>(approximator.py)"]
+    C -->|"ApproximationResult<br/>+ SensorTelemetry YAML"| D{"confidence ≥ 0.7?"}
+    D -->|"Нет"| MR["manual_review_required"]
+    D -->|"Да"| E["Step 3: Synthesizer<br/>(synthesizer.py / langgraph)"]
+    E -->|"build123d code"| F["Step 4: Judge<br/>(judge.py)"]
+    F -->|"Phase 1: syntax + topology"| G{"Phase 1 OK?"}
+    G -->|"Нет"| H{"retry < 3?"}
+    H -->|"Да"| E
+    H -->|"Нет"| FAIL["failure"]
+    G -->|"Да + STEP"| I["Phase 2: IoU"]
+    I -->|"IoU ≥ 0.98"| J["Step 5: Optimizer<br/>(optimizer.py)"]
+    I -->|"IoU < 0.98"| H
+    J --> K["Step 6: CAM<br/>(cam_export.py)"]
+    K --> OUT["G-code + STEP + Manifest"]
+
+    style MR fill:#f59e0b,color:#000
+    style FAIL fill:#ef4444,color:#fff
+    style OUT fill:#22c55e,color:#000
+```
+
+---
+
+## Покомпонентный анализ
+
+### 1. Sensor ([sensors/sensor.py](file:///c:/additive-light%20_dev/gdi_core/sensors/sensor.py) — 210 строк) ✅ Рабочий
+
+**Что делает:** Нарезает mesh по оси (X/Y/Z) с заданным шагом через Trimesh `.section()`, конвертирует каждый срез в Shapely `Polygon`, вычисляет метрики (`area`, `centroid`, `bbox`, `perimeter`, `num_holes`).
+
+**Сильные стороны:**
+- Корректная работа с MultiPolygon (берёт largest)
+- Подсчёт отверстий через `interiors`
+- Устойчив к пустым срезам (skip + warning)
+
+**Слабые стороны / Техдолг:**
+- [detect_axis_of_minimum_variance()](file:///c:/additive-light%20_dev/gdi_core/sensors/sensor.py#162-177) — **placeholder** (L162-176), всегда возвращает `"Z"`
+- Нет поддержки **прямоугольных** сечений — radius вычисляется из bbox как [(width + height) / 4](file:///c:/additive-light%20_dev/tests/test_quality_gates.py#24-27), что работает только для кругов
+- Нет кеширования — при повторных запросах перерезает заново
+- [_compute_metrics()](file:///c:/additive-light%20_dev/gdi_core/sensors/sensor.py#103-161) использует `entity.points`, что хрупко для некоторых типов entities в Trimesh
+
+---
+
+### 2. Alignment ([sensors/alignment.py](file:///c:/additive-light%20_dev/gdi_core/sensors/alignment.py) — 106 строк) ✅ Рабочий
+
+**Что делает:** Переносит mesh так, чтобы base_point был в начале координат, затем центрирует по XY.
+
+**Слабые стороны:**
+- [detect_principal_axis()](file:///c:/additive-light%20_dev/gdi_core/sensors/alignment.py#78-106) — **наивная эвристика** (axis с наибольшим extent ≠ build axis). Не использует момент инерции реально, хотя переменная `inertia` существует (L90)
+- Работа с center_point проецирует в XY и вращает — но **не обрабатывает** наклонные оси
+
+---
+
+### 3. Approximator ([approximator/approximator.py](file:///c:/additive-light%20_dev/gdi_core/approximator/approximator.py) — 461 строк) ✅ Рабочий, но ограниченный
+
+**Что делает:** [ZoneDetector](file:///c:/additive-light%20_dev/gdi_core/approximator/approximator.py#40-298) находит границы зон по резким изменениям area/centroid/holes, затем классифицирует каждую зону:
+- **Constant_Profile** (цилиндр) — если [var(radii) < 0.5](file:///c:/additive-light%20_dev/gdi_core/sensors/sensor.py#162-177)
+- **Linear_Regression** (конус/фаска) — если линейная регрессия фитится
+- **Complex** — всё остальное
+
+**Ключевые числа (hardcoded thresholds):**
+- Area change > 20% → граница зоны
+- Centroid jump > 5mm → граница зоны
+- Radius variance < 0.5 → цилиндр
+- RANSAC threshold: 0.5mm, 100 iterations
+
+> [!WARNING]
+> **Фундаментальное ограничение:** Вся логика работает на **«эффективном радиусе»** [(bbox_width + bbox_height) / 4](file:///c:/additive-light%20_dev/tests/test_quality_gates.py#24-27). Это означает, что **прямоугольные, L-образные и полигональные** сечения неправильно распознаются — они всегда интерпретируются как круговые. Тесты в [expected_results.yaml](file:///c:/additive-light%20_dev/benchmark_kit/expected_results.yaml) ожидают `Rectangle` cross-section для bracket и NEMA17, но текущий код **не умеет** их детектировать.
+
+**RANSAC:** Реализован корректно для constant-value fit. Для linear — используется обычный `lstsq`, не RANSAC.
+
+---
+
+### 4. Confidence ([approximator/confidence.py](file:///c:/additive-light%20_dev/gdi_core/approximator/confidence.py) — 103 строки) ✅ Рабочий
+
+**Формула:** `confidence = inlier_ratio × (1 - variance_penalty × 0.3) × (0.9 if holes else 1.0)`
+
+**Global:** `0.6 × min(zone_confidences) + 0.4 × mean(zone_confidences)` — **conservative**, одна плохая зона тянет всё вниз. Хорошее решение.
+
+---
+
+### 5. Synthesizer ([synthesis/synthesizer.py](file:///c:/additive-light%20_dev/gdi_core/synthesis/synthesizer.py) — 103 строки) 🔴 **ЗАГЛУШКА**
+
+> [!CAUTION]
+> **Это stub.** [generate_code()](file:///c:/additive-light%20_dev/gdi_core/synthesis/synthesizer.py#34-82) возвращает **шаблон с `pass`**, а не реальный вызов LLM. Строки 54-81 — просто текстовый template с `"# TODO: Implement geometry based on zones"`.
+
+Реальная LLM-интеграция → в [langgraph_pipeline.py](file:///c:/additive-light%20_dev/gdi_core/synthesis/langgraph_pipeline.py).
+
+---
+
+### 6. LangGraph Pipeline ([synthesis/langgraph_pipeline.py](file:///c:/additive-light%20_dev/gdi_core/synthesis/langgraph_pipeline.py) — 359 строк) ⚠️ Запускабельный, но неполный
+
+**Граф:** `prepare → synthesize → compile_check → evaluate_iou → (retry | end)`
+
+**Проблемы:**
+- [compile_and_check_node()](file:///c:/additive-light%20_dev/gdi_core/synthesis/langgraph_pipeline.py#126-181) строит `type('obj', ...)` вместо [JudgePhase1Result](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#228-235) (L152) — **антипаттерн**, сломается при сериализации
+- Code execution (build123d → STEP) **не реализован** — `step_file_path` всегда `None`
+- Без STEP файла → Phase 2 IoU **всегда скипается** → пайплайн всегда «success» даже для плохого кода
+- [create_llm_client()](file:///c:/additive-light%20_dev/gdi_core/synthesis/langgraph_pipeline.py#53-60) не прокидывает `api_key` из внешних настроек — использует дефолтный env
+
+---
+
+### 7. Judge ([judge/judge.py](file:///c:/additive-light%20_dev/gdi_core/judge/judge.py) — 289 строк) ✅ Хорошо спроектирован
+
+**Phase 1:** syntax через `ast.parse()` + паттерны build123d + OCP topology check
+**Phase 2:** IoU через slice comparison
+
+**Feedback для LLM** (L233-288) — **качественный**: указывает конкретные высоты с плохим IoU, даёт actionable instructions. Это ценная часть retry loop.
+
+---
+
+### 8. IoU Calculator ([judge/iou_calculator.py](file:///c:/additive-light%20_dev/gdi_core/judge/iou_calculator.py) — 171 строка) ✅ Рабочий
+
+Нарезает оба mesh на N срезов, строит Shapely polygons, считает `intersection / union`. Корректен.
+
+---
+
+### 9. Topology Checker ([judge/topology_checker.py](file:///c:/additive-light%20_dev/gdi_core/judge/topology_checker.py) — 99 строк) ⚠️ **Placeholder**
+
+- [check_topology()](file:///c:/additive-light%20_dev/gdi_core/judge/topology_checker.py#12-54) — **всегда возвращает `True`** (L45). OCP import обёрнут в try/except, и при отсутствии OCP тоже возвращает `True`.
+- [check_code_syntax()](file:///c:/additive-light%20_dev/gdi_core/judge/topology_checker.py#56-74) — работает через `ast.parse()`, корректен
+- [check_build123d_imports()](file:///c:/additive-light%20_dev/gdi_core/judge/topology_checker.py#76-99) — простые regex-проверки, корректны
+
+---
+
+### 10. Optimizer ([optimizer/optimizer.py](file:///c:/additive-light%20_dev/gdi_core/optimizer/optimizer.py) — 254 строки) ⚠️ Частично рабочий
+
+- [beautify_dimension()](file:///c:/additive-light%20_dev/gdi_core/optimizer/optimizer.py#17-52) — **хорошая** функция, округляет по инженерным стандартам
+- [parametrize_code()](file:///c:/additive-light%20_dev/gdi_core/optimizer/optimizer.py#54-128) — **проблема**: заменяет значения на имена параметров, но **не извлекает реальные значения** (L123: `TODO: Extract actual value` → всегда ставит `10.0`)
+- [beautify_code()](file:///c:/additive-light%20_dev/gdi_core/optimizer/optimizer.py#130-164) regex [(\D)(\d+\.?\d*)(\D)](file:///c:/additive-light%20_dev/tests/test_quality_gates.py#24-27) может ломать строки, комментарии и переменные
+
+---
+
+### 11. CAM Export ([cam/cam_export.py](file:///c:/additive-light%20_dev/gdi_core/cam/cam_export.py) — 125 строк) 🔴 **ЗАГЛУШКА**
+
+- [generate_gcode()](file:///c:/additive-light%20_dev/gdi_core/cam/cam_export.py#24-87) — пытается импортировать FreeCAD, но при ImportError возвращает `False`
+- [generate_simple_gcode()](file:///c:/additive-light%20_dev/gdi_core/cam/cam_export.py#88-125) — пишет **статический G-code header** без реальных toolpaths
+
+---
+
+### 12. YAML Contract ([models/yaml_contract.py](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py) — 319 строк) ✅ **Отлично**
+
+10 Pydantic-моделей с валидацией:
+- [GlobalState](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#29-56) — Literal types для target_action/library/axis
+- [TopologicalZone](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#96-141) — validator на span_z ordering
+- [ZoneParameters](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#58-94) — extra="allow" для расширяемости
+- [AgentTask](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#143-168) — min_length на thought_process (50 chars) → SCoT discipline
+- [RunManifest](file:///c:/additive-light%20_dev/gdi_core/models/yaml_contract.py#279-319) — полная трассировка с retry_history
+
+> [!TIP]
+> Это **самая зрелая часть** проекта. Хорошо спроектированный контракт, готовый к продакшену.
+
+---
+
+### 13. Manifest Utils ([utils/manifest.py](file:///c:/additive-light%20_dev/gdi_core/utils/manifest.py) — 182 строки) ✅ Рабочий
+
+JSON/YAML сериализация, date-based directory structure, latest.json pointer, filtering by status/date.
+
+---
+
+## Карта зрелости модулей
+
+| Модуль | LOC | Статус | Готовность |
+|--------|-----|--------|------------|
+| `models/yaml_contract` | 319 | ✅ Production-ready | 🟢 95% |
+| `sensors/sensor` | 210 | ✅ Рабочий | 🟡 75% |
+| `sensors/alignment` | 106 | ⚠️ Наивная эвристика | 🟡 60% |
+| `approximator/approximator` | 461 | ✅ Рабочий (только круги) | 🟡 65% |
+| `approximator/confidence` | 103 | ✅ Рабочий | 🟢 90% |
+| `judge/judge` | 289 | ✅ Хорошо | 🟢 85% |
+| `judge/iou_calculator` | 171 | ✅ Рабочий | 🟢 85% |
+| `judge/topology_checker` | 99 | 🔴 Placeholder | 🔴 20% |
+| `synthesis/synthesizer` | 103 | 🔴 Stub | 🔴 10% |
+| `synthesis/langgraph_pipeline` | 359 | ⚠️ Неполный | 🟡 50% |
+| `optimizer/optimizer` | 254 | ⚠️ Частичный | 🟡 55% |
+| `cam/cam_export` | 125 | 🔴 Placeholder | 🔴 15% |
+| `utils/manifest` | 182 | ✅ Рабочий | 🟢 90% |
+| [api.py](file:///c:/additive-light%20_dev/gdi_core/api.py) | 442 | ✅ Хорошо | 🟢 85% |
+
+---
+
+## Тестовое покрытие
+
+| Файл теста | Кол-во тестов | Что покрывает | Зависимости |
+|------------|--------------|---------------|-------------|
+| [test_yaml_contract.py](file:///c:/additive-light%20_dev/tests/test_yaml_contract.py) | 20 (AC-001..020) | Валидация всех Pydantic-моделей, YAML roundtrip | Без IO |
+| [test_judge.py](file:///c:/additive-light%20_dev/tests/test_judge.py) | 14 (JR-001..014) | Phase1 syntax, patterns, retry logic | Без IO |
+| [test_quality_gates.py](file:///c:/additive-light%20_dev/tests/test_quality_gates.py) | 13 (QG-001..013) | Sensor+Approximator на benchmark STL | **Требует STL файлы** |
+
+**Не покрыто тестами:**
+- Synthesizer (stub)
+- LangGraph pipeline
+- Optimizer
+- CAM
+- Alignment
+- IoU calculator
+- Manifest persistence
+
+---
+
+## Критические разрывы (что блокирует production)
+
+### 1. 🔴 **Synthesizer — заглушка**
+[generate_code()](file:///c:/additive-light%20_dev/gdi_core/synthesis/synthesizer.py#34-82) отдаёт template с `pass`. LangGraph pipeline вызывает LLM, но **не исполняет** сгенерированный код → STEP файл никогда не создаётся → Phase 2 IoU всегда скипается.
+
+**Чтобы пайплайн работал end-to-end, нужно:**
+1. Подключить реальный LLM-вызов через Synthesizer
+2. Реализовать execution sandbox для build123d кода → STEP
+3. Починить `type('obj', ...)` в langgraph_pipeline
+
+### 2. 🔴 **Нет детекции не-круговых сечений**
+Approximator считает «радиус» из bbox для всех фигур. Rectangle/L-profile/Polygon — не поддерживаются. [expected_results.yaml](file:///c:/additive-light%20_dev/benchmark_kit/expected_results.yaml) ожидает `Rectangle` для bracket и NEMA17, но тесты **провалятся** на этих кейсах.
+
+### 3. 🔴 **Topology checker — placeholder**
+OCP (OpenCASCADE) нигде не установлен, [check_topology()](file:///c:/additive-light%20_dev/gdi_core/judge/topology_checker.py#12-54) всегда `True`.
+
+### 4. ⚠️ **CAM — заглушка**
+G-code генерация не работает. FreeCAD Path не интегрирован.
+
+---
+
+## Что работает хорошо (keep)
+
+1. **YAML Contract v1.0** — зрелая Pydantic-модель, правильные validators
+2. **Sensor + RANSAC Approximator** — стабильная детерминистическая фаза для тел вращения
+3. **2-фазный Judge** с feedback loop — правильная архитектура retry
+4. **Confidence scoring** — conservative weakest-link approach
+5. **API фасад** — Clean Architecture, progress callbacks для Web
+6. **Benchmark Kit** — продуманные expected_results с tolerance
+
+---
+
+## Готов к приёму ТЗ на спринт 🎯

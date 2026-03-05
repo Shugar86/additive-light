@@ -1,0 +1,102 @@
+# Sensor Registry
+# Defines all available sensors and their configurations
+
+sensors:
+  X:
+    sensor_id: "X"
+    sensor_type: "axis_slice"
+    axes:
+      - "X"
+    parameters:
+      slice_count: 20
+      tolerance: 0.01
+      direction: "positive"
+    enabled: true
+    priority: 1
+    dependencies: []
+  
+  Y:
+    sensor_id: "Y"
+    sensor_type: "axis_slice"
+    axes:
+      - "Y"
+    parameters:
+      slice_count: 20
+      tolerance: 0.01
+      direction: "positive"
+    enabled: true
+    priority: 1
+    dependencies: []
+  
+  Z:
+    sensor_id: "Z"
+    sensor_type: "axis_slice"
+    axes:
+      - "Z"
+    parameters:
+      slice_count: 20
+      tolerance: 0.01
+      direction: "positive"
+    enabled: true
+    priority: 1
+    dependencies: []
+  
+  # Example of a custom sensor (not enabled by default)
+  surface_probe:
+    sensor_id: "surface_probe"
+    sensor_type: "surface_probe"
+    axes:
+      - "X"
+      - "Y"
+      - "Z"
+    parameters:
+      probe_density: 100
+      sampling_method: "uniform"
+    enabled: false
+    priority: 2
+    dependencies:
+      - "X"
+      - "Y"
+      - "Z"
+  
+  feature_detector:
+    sensor_id: "feature_detector"
+    sensor_type: "feature_detector"
+    axes:
+      - "X"
+      - "Y"
+      - "Z"
+    parameters:
+      detection_algorithms:
+        - "circle"
+        - "rectangle"
+        - "polygon"
+    enabled: false
+    priority: 2
+    dependencies:
+      - "X"
+      - "Y"
+      - "Z"
+
+# Default sensors used when no specific configuration is provided
+default_sensors:
+  - "X"
+  - "Y"
+  - "Z"
+
+# Sensor groups for specific analysis modes
+sensor_groups:
+  standard_ortho:
+    - "X"
+    - "Y"
+    - "Z"
+  
+  detailed_analysis:
+    - "X"
+    - "Y"
+    - "Z"
+    - "surface_probe"
+    - "feature_detector"
+  
+  quick_scan:
+    - "Z"

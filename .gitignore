@@ -1,42 +1,58 @@
-# Secrets / API keys
-.env
-*.env
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
 
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
+*.so
 .Python
-*.egg-info/
-dist/
 build/
-.venv/
-venv/
-env/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Pytest
+# Testing
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
 
-# Output / logs (local artifacts)
-output/
-logs/
-test_output/
-
-# Large binary files (download separately)
-openscad.wasm
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# VSCode
-.vscode/
-*.code-workspace
+# Project specific
+*.stl
+*.step
+*.stp
+*.3mf
+*.gcode
+temp/
+logs/*.log
+output/
 
-# Temp / scratch
-*.tmp
-*.bak
+# Environment
+.env
+.env.local
