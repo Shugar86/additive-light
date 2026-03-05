@@ -1,13 +1,25 @@
-# Pull Request Template
+## Что сделано
 
-## R&D Approach
-- Provide a brief description of the research and development approach taken in this pull request.
+<!-- Одна-две строки: суть изменений -->
 
-## Findings
-- Summarize the findings that emerged from the development process.
+## Зачем / Задача
 
-## Comparison with Alternatives
-- Compare this approach with other alternatives discussed or considered during the development.
+<!-- Ссылка на issue или описание задачи -->
 
-## Additional Notes
-- Any additional notes or comments regarding the pull request.
+## Как проверить
+
+<!-- Шаги для ревьюера, чтобы воспроизвести/протестировать -->
+1. 
+2. 
+
+## Чеклист
+
+- [ ] Код покрыт type hints
+- [ ] Публичные функции имеют docstring
+- [ ] Тесты написаны / обновлены (`pytest tests/`)
+- [ ] Нет отладочного кода (`print`, `breakpoint`)
+- [ ] `requirements.txt` обновлён (если добавлял зависимости)
+
+## Скриншоты / логи (если применимо)
+
+<!-- Вставь скриншот UI или вывод консоли если это помогает понять изменение -->
