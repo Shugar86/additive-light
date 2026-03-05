@@ -1,50 +1,25 @@
-# Branch Protection — Автоматическая настройка
+# Настройка защиты веток (1 раз владельцу репозитория)
 
-Защита веток применяется через скрипт + JSON-конфиг, без ручной возни в GitHub UI.
+Эта настройка **нужна только один раз** в самом начале проекта, чтобы случайно не запушить сломанный код напрямую в `main` или `develop`.  
+Делает это **только Shugar86** (как создатель репозитория). Коллеге ничего делать не нужно.
 
-## Файлы
+## Шаги (занимает 1 минуту):
 
-| Файл | Назначение |
-|------|-----------|
-| `.github/branch_protection.json` | Конфиг правил для `main` и `develop` |
-| `.github/apply_branch_protection.py` | Скрипт применения через GitHub API |
+1. Открой GitHub: [Настройки веток репозитория](https://github.com/Shugar86/additive-light/settings/branches)
+2. Нажми кнопку **"Add branch ruleset"** (или "Add rule")
+3. Заполни форму для ветки `main`:
+   * **Rule name**: `main`
+   * **Target branches**: `Add target -> Include by pattern -> main`
+   * Поставь галочки:
+     * ✅ **Require a pull request before merging** 
+     * ✅ **Require approvals (1)**
+     * ✅ **Block force pushes**
+     * ✅ **Block deletions**
+4. Нажми **"Create"** или **"Save"** внизу.
+5. Повтори шаги 2-4 для ветки `develop`:
+   * **Rule name**: `develop`
+   * **Target branches**: `Add target -> Include by pattern -> develop`
+   * ✅ **Require a pull request before merging** 
+   * ✅ **Require approvals (1)**
 
-## Получить Personal Access Token (PAT)
-
-1. GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**
-2. **Generate new token (classic)**
-3. Scope: `repo` (для публичного репо достаточно `public_repo`)
-4. Скопировать токен — он показывается **один раз**
-
-## Применить защиту
-
-```bash
-python .github/apply_branch_protection.py --token ghp_xxxxxxxxxxxxxxxxxxxx
-```
-
-Ожидаемый вывод:
-```
-Applying branch protection for: Shugar86/additive-light
-  [OK] main: protection applied
-  [OK] develop: protection applied
-
-All branches protected successfully.
-```
-
-## Что применяется
-
-### `main` — строгая защита
-- Требуется **1 approve** в PR перед мержем
-- Stale reviews сбрасываются при новых коммитах
-- Правила применяются **в том числе к администраторам** (`enforce_admins: true`)
-- Force push и удаление ветки **запрещены**
-
-### `develop` — стандартная защита
-- Требуется **1 approve** в PR перед мержем
-- Администраторы могут пушить напрямую (для хотфиксов)
-- Force push и удаление ветки **запрещены**
-
-## Изменить правила
-
-Отредактируй `branch_protection.json` и перезапусти скрипт.  
-Полная схема полей: [GitHub Docs — Branch Protection API](https://docs.github.com/en/rest/branches/branch-protection)
+Всё! Теперь никто из вас двоих (даже случайно) не сможет запушить что-то прямо в `main` или `develop` минуя Pull Request. Коллеге про это думать не надо, он просто работает в своих ветках `feature/*`.
