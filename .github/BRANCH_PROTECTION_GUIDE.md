@@ -1,40 +1,50 @@
-# Branch Protection Guide
+# Branch Protection — Автоматическая настройка
 
-## Purpose
-This guide explains how to set up branch protection rules for the `develop` and `main` branches in your GitHub repository.
+Защита веток применяется через скрипт + JSON-конфиг, без ручной возни в GitHub UI.
 
-## Setting Up Branch Protection Rules
-1. **Navigate to Your Repository**  
-   Go to your repository on GitHub.
+## Файлы
 
-2. **Access Settings**  
-   Click on the `Settings` tab located at the top of your repository page.
+| Файл | Назначение |
+|------|-----------|
+| `.github/branch_protection.json` | Конфиг правил для `main` и `develop` |
+| `.github/apply_branch_protection.py` | Скрипт применения через GitHub API |
 
-3. **Select Branches**  
-   In the left sidebar, click on `Branches`.
+## Получить Personal Access Token (PAT)
 
-4. **Add Branch Protection Rule**  
-   - Under the `Branch protection rules` section, click on `Add rule`.
+1. GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**
+2. **Generate new token (classic)**
+3. Scope: `repo` (для публичного репо достаточно `public_repo`)
+4. Скопировать токен — он показывается **один раз**
 
-5. **Specify Branch Name Pattern**  
-   - For the `develop` branch, enter `develop`.  
-   - For the `main` branch, enter `main`.  
-   You can also use wildcard patterns (e.g., `release/*`).
+## Применить защиту
 
-6. **Configure Protection Settings**  
-   Choose the settings you want to enforce for the branch protection rule:
-   - **Require pull request reviews before merging**  
-     (recommended: at least one approval)
-   - **Require status checks to pass before merging**  
-     (specify which checks must pass)
-   - **Include administrators**  
-     (to enforce these rules even for repository admins)
+```bash
+python .github/apply_branch_protection.py --token ghp_xxxxxxxxxxxxxxxxxxxx
+```
 
-7. **Create Rule**  
-   Click `Create` or `Save changes` to apply the branch protection rule.
+Ожидаемый вывод:
+```
+Applying branch protection for: Shugar86/additive-light
+  [OK] main: protection applied
+  [OK] develop: protection applied
 
-8. **Repeat for Additional Branches**  
-   If needed, repeat these steps for other branches (e.g., `develop` if you started with `main`).
+All branches protected successfully.
+```
 
-## Conclusion  
-Branch protection rules help maintain the integrity of your code in important branches. Make sure to review these settings periodically to fit your workflow and team needs.
+## Что применяется
+
+### `main` — строгая защита
+- Требуется **1 approve** в PR перед мержем
+- Stale reviews сбрасываются при новых коммитах
+- Правила применяются **в том числе к администраторам** (`enforce_admins: true`)
+- Force push и удаление ветки **запрещены**
+
+### `develop` — стандартная защита
+- Требуется **1 approve** в PR перед мержем
+- Администраторы могут пушить напрямую (для хотфиксов)
+- Force push и удаление ветки **запрещены**
+
+## Изменить правила
+
+Отредактируй `branch_protection.json` и перезапусти скрипт.  
+Полная схема полей: [GitHub Docs — Branch Protection API](https://docs.github.com/en/rest/branches/branch-protection)
