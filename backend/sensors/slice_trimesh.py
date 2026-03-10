@@ -349,3 +349,121 @@ class SliceAnalyzer:
 
         logger.info(f"Found {len(valid_cylinders)} cylindrical features along {axis}-axis")
         return valid_cylinders
+
+    def sample_profile_along_axis(
+        self,
+        axis: str = 'Z',
+        num_samples: int = 50,
+        sample_type: str = "radius"
+    ) -> List[Dict[str, Any]]:
+        """Sample radial profile along the specified axis.
+
+        This is the core function for shaft profiling. It slices the mesh
+        perpendicular to the axis and measures the cross-section properties.
+
+        Args:
+            axis: Axis to sample along ('X', 'Y', or 'Z').
+            num_samples: Number of sample positions along the axis.
+            sample_type: Type of measurement - "radius", "area", or "full".
+
+        Returns:
+            List of sample dictionaries with keys:
+            - position: float, position along axis
+            - radius: float, estimated radius (for circular sections)
+            - area: float, cross-sectional area
+            - circularity: float, how circular the section is (0-1)
+            - centroid: [x, y], 2D centroid of cross-section
+            - bounds: [[min_x, min_y], [max_x, max_y]], bounding box
+        """
+        if axis.upper() not in ['X', 'Y', 'Z']:
+            raise ValueError(f"Axis must be 'X', 'Y', or 'Z', got: {axis}")
+
+        axis_map = {'X': 0, 'Y': 1, 'Z': 2}
+        axis_idx = axis_map[axis.upper()]
+
+        # Get bounds along axis
+        bounds = self.mesh.bounds
+        min_pos = bounds[0][axis_idx]
+        max_pos = bounds[1][axis_idx]
+
+        # Create sample positions
+        positions = np.linspace(min_pos, max_pos, num_samples)
+        logger.debug(f"Sampling {num_samples} positions along {axis}-axis from {min_pos:.3f} to {max_pos:.3f}")
+
+        samples = []
+        for pos in positions:
+            try:
+                sample = self._sample_at_position(axis_idx, pos, axis, sample_type)
+                if sample:
+                    samples.append(sample)
+            except Exception as e:
+                logger.debug(f"Failed to sample at position {pos}: {e}")
+                continue
+
+        logger.info(f"Collected {len(samples)} profile samples along {axis}-axis")
+        return samples
+
+    def _sample_at_position(
+        self,
+        axis_idx: int,
+        position: float,
+        axis_name: str,
+        sample_type: str
+    ) -> Optional[Dict[str, Any]]:
+        """Sample cross-section at a single position."""
+        plane_normal = [0.0, 0.0, 0.0]
+        plane_normal[axis_idx] = 1.0
+        plane_origin = [0.0, 0.0, 0.0]
+        plane_origin[axis_idx] = position
+
+        try:
+            slice_3d = self.mesh.section(plane_origin=plane_origin, plane_normal=plane_normal)
+            if slice_3d is None:
+                return None
+
+            slice_2d, _ = slice_3d.to_planar()
+
+            # Extract polygons
+            polygons = []
+            if hasattr(slice_2d, 'polygons_full'):
+                for poly in slice_2d.polygons_full:
+                    try:
+                        shapely_poly = Polygon(poly)
+                        if shapely_poly.is_valid and shapely_poly.area > 0:
+                            polygons.append(shapely_poly)
+                    except Exception:
+                        continue
+
+            if not polygons:
+                return None
+
+            # Find the largest polygon (outer profile)
+            largest_poly = max(polygons, key=lambda p: p.area)
+
+            area = largest_poly.area
+            perimeter = largest_poly.length
+            centroid = list(largest_poly.centroid.coords)[0] if hasattr(largest_poly.centroid, 'coords') else [0.0, 0.0]
+            bounds = largest_poly.bounds
+
+            # Compute circularity
+            circularity = (4 * np.pi * area) / (perimeter ** 2) if perimeter > 0 else 0
+
+            # Estimate radius from area (assuming circular)
+            radius = np.sqrt(area / np.pi)
+
+            result = {
+                "position": float(position),
+                "axis": axis_name,
+                "area": float(area),
+                "perimeter": float(perimeter),
+                "circularity": float(circularity),
+                "radius": float(radius),
+                "centroid": list(centroid),
+                "bounds": [[float(bounds[0]), float(bounds[1])], [float(bounds[2]), float(bounds[3])]]
+            }
+
+            return result
+
+        except Exception as e:
+            logger.debug(f"Sample at position {position} failed: {e}")
+            return None

@@ -85,6 +85,7 @@ class SecureExecutor:
             Dictionary with:
             - success: bool
             - output_path: path to generated STL/STEP file (if success)
+            - output_files: dict with 'step', 'stl' paths
             - error: error message (if failed)
             - stdout: captured stdout
             - stderr: captured stderr
@@ -94,7 +95,8 @@ class SecureExecutor:
             return {
                 "success": False,
                 "error": "No code to execute",
-                "output_path": None
+                "output_path": None,
+                "output_files": {}
             }
 
         # Create temporary script file
@@ -117,16 +119,34 @@ class SecureExecutor:
             output_stl = self.temp_dir / f"output_{id(code)}.stl"
             output_step = self.temp_dir / f"output_{id(code)}.step"
             
+            output_files = {}
             output_path = None
+            
             if output_stl.exists():
+                output_files["stl"] = str(output_stl)
                 output_path = str(output_stl)
-            elif output_step.exists():
-                output_path = str(output_step)
+            if output_step.exists():
+                output_files["step"] = str(output_step)
+                if not output_path:
+                    output_path = str(output_step)
+
+            # Also check for named files from shaft code generation
+            shaft_stl = self.temp_dir / "shaft_preview.stl"
+            shaft_step = self.temp_dir / "shaft.step"
+            
+            if shaft_stl.exists():
+                output_files["stl"] = str(shaft_stl)
+                output_path = str(shaft_stl)
+            if shaft_step.exists():
+                output_files["step"] = str(shaft_step)
+                if not output_path:
+                    output_path = str(shaft_step)
 
             return {
                 "success": result["success"],
                 "error": result.get("error"),
                 "output_path": output_path,
+                "output_files": output_files,
                 "stdout": result.get("stdout", ""),
                 "stderr": result.get("stderr", "")
             }
@@ -136,7 +156,8 @@ class SecureExecutor:
             return {
                 "success": False,
                 "error": str(e),
-                "output_path": None
+                "output_path": None,
+                "output_files": {}
             }
         
         finally:

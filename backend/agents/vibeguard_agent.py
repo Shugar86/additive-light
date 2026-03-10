@@ -596,6 +596,106 @@ class VibeGuardAgent:
         return None
 
 
+    def generate_json_reflection(
+        self,
+        state: Any,
+        comparison_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate structured JSON reflection for self-healing loop.
+        
+        This output is machine-readable and provides specific guidance
+        for the reflection/repair process.
+        
+        Args:
+            state: Current CAD state.
+            comparison_result: Result from compare() method.
+        
+        Returns:
+            Structured reflection dictionary.
+        """
+        reflection = {
+            "reflection_type": "geometric_validation",
+            "iteration": getattr(state, 'iteration_count', 0),
+            "metrics": {
+                "chamfer_distance": comparison_result.get("chamfer_distance"),
+                "hausdorff_distance": comparison_result.get("hausdorff_distance"),
+                "bbox_delta": None,
+                "volume_delta": None
+            },
+            "validation_passed": comparison_result.get("passed", False),
+            "errors": [],
+            "suggestions": []
+        }
+        
+        # Compute bbox and volume metrics
+        try:
+            import trimesh
+            
+            orig_mesh = trimesh.load(state.stl_path)
+            gen_mesh = trimesh.load(state.final_mesh_path) if state.final_mesh_path else None
+            
+            if gen_mesh:
+                # BBox delta
+                orig_bounds = orig_mesh.bounds
+                gen_bounds = gen_mesh.bounds
+                bbox_delta = np.abs(orig_bounds - gen_bounds).tolist()
+                reflection["metrics"]["bbox_delta"] = bbox_delta
+                
+                # Volume delta
+                orig_volume = orig_mesh.volume if orig_mesh.is_watertight else 0
+                gen_volume = gen_mesh.volume if gen_mesh.is_watertight else 0
+                if orig_volume > 0:
+                    volume_delta = (gen_volume - orig_volume) / orig_volume
+                    reflection["metrics"]["volume_delta"] = float(volume_delta)
+                    
+                # Point-to-mesh distances
+                sample_points = orig_mesh.sample(1000)
+                if hasattr(gen_mesh, 'nearest'):
+                    distances = gen_mesh.nearest.on_surface(sample_points)[1]
+                    reflection["metrics"]["mean_point_distance"] = float(np.mean(distances))
+                    reflection["metrics"]["max_point_distance"] = float(np.max(distances))
+        except Exception as e:
+            logger.warning(f"[VibeGuard] Could not compute detailed metrics: {e}")
+        
+        # Format errors for reflection
+        for error in comparison_result.get("errors", []):
+            reflection["errors"].append({
+                "type": error.get("type", "unknown"),
+                "description": error.get("description", ""),
+                "severity": error.get("severity", "medium"),
+                "location": error.get("location"),
+                "suggestion": error.get("suggestion", "")
+            })
+        
+        # Generate high-level suggestions
+        if not reflection["validation_passed"]:
+            chamfer = reflection["metrics"]["chamfer_distance"]
+            if chamfer and chamfer > self.chamfer_tolerance * 2:
+                reflection["suggestions"].append({
+                    "priority": 1,
+                    "action": "verify_base_dimensions",
+                    "description": "Global dimensions may be incorrect - verify cylinder radii and lengths"
+                })
+            
+            if reflection["metrics"]["volume_delta"] and abs(reflection["metrics"]["volume_delta"]) > 0.3:
+                reflection["suggestions"].append({
+                    "priority": 2,
+                    "action": "check_feature_cuts",
+                    "description": "Volume mismatch detected - verify all holes and cuts are properly applied"
+                })
+            
+            # Check for specific error types
+            error_types = [e["type"] for e in reflection["errors"]]
+            if "local_deviation" in error_types:
+                reflection["suggestions"].append({
+                    "priority": 3,
+                    "action": "refine_local_features",
+                    "description": "Local geometry deviations detected - review keyway/flat positions and dimensions"
+                })
+        
+        return reflection
+
+
 def create_vibeguard_agent() -> callable:
     """Factory function for creating VibeGuard agent.
 
@@ -605,6 +705,11 @@ def create_vibeguard_agent() -> callable:
     agent = VibeGuardAgent()
     
     def vibeguard_fn(state: Any) -> Dict[str, Any]:
-        return agent.compare(state)
+        result = agent.compare(state)
+        
+        # Add structured reflection for self-healing
+        result["reflection"] = agent.generate_json_reflection(state, result)
+        
+        return result
     
     return vibeguard_fn

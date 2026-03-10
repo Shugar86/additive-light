@@ -91,6 +91,139 @@ class BuildStep(BaseModel):
     dependencies: List[int] = Field(default_factory=list)
 
 
+# =============================================================================
+# Shaft MVP: Strict Construction Plan Models
+# =============================================================================
+
+class ShaftZoneType(str, Enum):
+    """Types of zones in a shaft construction plan."""
+    CYLINDER = "cylinder"
+    FILLET = "fillet"
+    CHAMFER = "chamfer"
+    GROOVE = "groove"
+    STEP = "step"
+
+
+class ShaftZoneSpec(BaseModel):
+    """Specification for a shaft zone (segment).
+    
+    This is the core building block for revolve-based shaft construction.
+    Each zone represents a section with constant or varying radius.
+    """
+    zone_type: ShaftZoneType
+    start_pos: float = Field(..., description="Start position along shaft axis")
+    end_pos: float = Field(..., description="End position along shaft axis")
+    start_radius: float = Field(..., ge=0, description="Radius at start position")
+    end_radius: float = Field(..., ge=0, description="Radius at end position")
+    mean_radius: float = Field(..., ge=0, description="Average radius in zone")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    
+    # Additional metadata for specific zone types
+    chamfer_angle: Optional[float] = Field(None, description="Chamfer angle in degrees (for chamfer zones)")
+    fillet_radius: Optional[float] = Field(None, ge=0, description="Fillet radius (for fillet zones)")
+
+
+class LocalFeatureType(str, Enum):
+    """Types of local features on shafts."""
+    KEYWAY = "keyway"
+    FLAT = "flat"
+    CROSS_HOLE = "cross_hole"
+    GROOVE = "groove"
+    SNAP_RING = "snap_ring"
+
+
+class LocalFeatureSpec(BaseModel):
+    """Specification for a local feature (keyway, flat, hole).
+    
+    These features are applied after the base revolve geometry.
+    """
+    feature_type: LocalFeatureType
+    position: List[float] = Field(..., min_length=3, max_length=3, description="3D center position [x, y, z]")
+    orientation: List[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0], min_length=3, max_length=3)
+    dimensions: Dict[str, float] = Field(default_factory=dict, description="Feature dimensions (width, depth, length, diameter)")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    zone_index: Optional[int] = Field(None, description="Which zone this feature belongs to")
+
+
+class AxisSpec(BaseModel):
+    """Specification for the shaft main axis."""
+    direction: List[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0], min_length=3, max_length=3)
+    origin: List[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0], min_length=3, max_length=3)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    length: float = Field(..., gt=0, description="Shaft length along axis")
+
+
+class MeasurementLogEntry(BaseModel):
+    """Single entry in the measurement log."""
+    timestamp: str
+    operation: str
+    status: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ShaftConstructionPlan(BaseModel):
+    """Strict construction plan for shaft reverse engineering.
+    
+    This is the hard contract between sensor pipeline and code generator.
+    NO free text - only structured, machine-checkable data.
+    
+    Attributes:
+        part_type: Always "shaft" for shaft parts
+        base_axis: Main rotational axis specification
+        segments: List of shaft zones (cylinders, fillets, etc.)
+        features: List of local features (keyways, holes, etc.)
+        fillets: List of fillet specifications
+        chamfers: List of chamfer specifications
+        confidence: Overall detection confidence
+        measurement_log: Audit trail of measurements
+    """
+    part_type: str = Field(default="shaft", const=True)
+    base_axis: AxisSpec
+    segments: List[ShaftZoneSpec] = Field(default_factory=list)
+    features: List[LocalFeatureSpec] = Field(default_factory=list)
+    fillets: List[Dict[str, Any]] = Field(default_factory=list)
+    chamfers: List[Dict[str, Any]] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    measurement_log: List[MeasurementLogEntry] = Field(default_factory=list)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dictionary for JSON output."""
+        return self.model_dump()
+    
+    def validate_geometry(self) -> List[str]:
+        """Validate construction plan geometry.
+        
+        Returns:
+            List of validation errors (empty if valid).
+        """
+        errors = []
+        
+        # Check for segments
+        if not self.segments:
+            errors.append("No shaft segments defined")
+        
+        # Check segment continuity
+        for i in range(len(self.segments) - 1):
+            seg1 = self.segments[i]
+            seg2 = self.segments[i + 1]
+            
+            # End of one should match start of next
+            if abs(seg1.end_pos - seg2.start_pos) > 0.01:
+                errors.append(f"Gap between segment {i} and {i+1}")
+            
+            # Radius continuity at transitions
+            if abs(seg1.end_radius - seg2.start_radius) > 0.1:
+                # Large jump might indicate a step (allowed) or error
+                pass  # Steps are valid
+        
+        # Check for negative radii
+        for seg in self.segments:
+            if seg.start_radius < 0 or seg.end_radius < 0:
+                errors.append(f"Negative radius in segment at {seg.start_pos}")
+        
+        return errors
+
+
 class CADState(BaseModel):
     """Main state object flowing through the LangGraph.
     
@@ -119,6 +252,9 @@ class CADState(BaseModel):
     # Coordinator outputs
     identified_features: List[Feature3D] = Field(default_factory=list)
     construction_plan: List[BuildStep] = Field(default_factory=list)
+    
+    # Shaft MVP: Dedicated construction plan
+    shaft_construction_plan: Optional[ShaftConstructionPlan] = None
     
     # Coder outputs
     generated_code: str = ""

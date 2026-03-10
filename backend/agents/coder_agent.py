@@ -8,7 +8,7 @@ import logging
 import json
 from typing import Dict, Any, List, Optional
 
-from backend.core.state import CADState, BuildStep, Feature3D
+from backend.core.state import CADState, BuildStep, Feature3D, ShaftConstructionPlan
 from backend.core.config import settings
 from backend.core.agent_prompt_compiler import get_prompt_compiler
 
@@ -279,14 +279,204 @@ Generate only the Python code, no markdown formatting."""
         
         return "\n".join(parts)
 
+    # =============================================================================
+    # Shaft MVP: Revolve-based code generation
+    # =============================================================================
 
-def create_coder_agent(llm_client: Optional[Any] = None) -> callable:
+    def generate_shaft_code(self, state: CADState, output_dir: Optional[str] = None) -> str:
+        """Generate build123d code using revolve approach for shafts.
+        
+        This uses the shaft_construction_plan to generate a revolve-based
+        parametric model with proper feature operations.
+        
+        Args:
+            state: CAD state with shaft_construction_plan.
+            output_dir: Optional directory for output files.
+        
+        Returns:
+            Python code string using build123d.
+        
+        Raises:
+            ValueError: If no shaft_construction_plan is available.
+        """
+        if not state.shaft_construction_plan:
+            raise ValueError("No shaft construction plan available")
+        
+        plan = state.shaft_construction_plan
+        
+        logger.info(f"[CoderAgent] Generating shaft code: {len(plan.segments)} segments, "
+                   f"{len(plan.features)} features")
+        
+        try:
+            code = self._generate_shaft_revolve_code(plan, output_dir)
+            logger.info(f"[CoderAgent] Generated {len(code)} characters of shaft code")
+            return code
+        except Exception as e:
+            logger.error(f"[CoderAgent] Shaft code generation failed: {e}")
+            raise RuntimeError(f"Shaft code generation failed: {e}") from e
+    
+    def _generate_shaft_revolve_code(
+        self,
+        plan: ShaftConstructionPlan,
+        output_dir: Optional[str] = None
+    ) -> str:
+        """Generate revolve-based build123d code for a shaft."""
+        lines = [
+            '"""Generated parametric shaft model using build123d."""',
+            "",
+            "from build123d import *",
+            "from build123d.exporters import export_step, export_stl",
+            "import pathlib",
+            "",
+            "# Parameters",
+            f"shaft_length = {plan.base_axis.length:.6f}",
+        ]
+        
+        # Add zone parameters
+        for i, zone in enumerate(plan.segments):
+            lines.append(f"zone{i}_radius = {zone.mean_radius:.6f}")
+            lines.append(f"zone{i}_length = {zone.end_pos - zone.start_pos:.6f}")
+        
+        # Add feature parameters
+        for i, feature in enumerate(plan.features):
+            for key, value in feature.dimensions.items():
+                lines.append(f"feature{i}_{key} = {value:.6f}")
+        
+        lines.extend([
+            "",
+            "# Build the shaft",
+            "with BuildPart() as shaft:",
+        ])
+        
+        # Build revolve profile from zones
+        indent = "    "
+        lines.extend(self._generate_revolve_profile(plan, indent))
+        
+        # Add feature cuts
+        for i, feature in enumerate(plan.features):
+            lines.extend(self._generate_feature_cut(feature, i, indent))
+        
+        # Export
+        lines.extend([
+            "",
+            "# Get the part",
+            "part = shaft.part",
+            "",
+            "# Export",
+            f"output_dir = pathlib.Path('{output_dir or 'output'}')",
+            "output_dir.mkdir(parents=True, exist_ok=True)",
+            "export_step(part, output_dir / 'shaft.step')",
+            "export_stl(part, output_dir / 'shaft_preview.stl')",
+            "",
+            "if __name__ == '__main__':",
+            '    print(f"Generated shaft: {part.volume:.4f} mm^3")',
+        ])
+        
+        return "\n".join(lines)
+    
+    def _generate_revolve_profile(
+        self,
+        plan: ShaftConstructionPlan,
+        indent: str
+    ) -> List[str]:
+        """Generate the revolve profile from shaft segments."""
+        lines = []
+        
+        # Build profile points from zones
+        # For proper revolve, we need a polyline in the X-Y plane
+        # that will be revolved around the Y-axis (or Z-axis in build123d)
+        
+        lines.append(f"{indent}# Build revolve profile")
+        lines.append(f"{indent}with BuildSketch(Plane.XZ) as profile:")
+        lines.append(f"{indent}    # Profile points (radius, position)")
+        
+        # Collect unique (position, radius) points
+        profile_points = []
+        for zone in plan.segments:
+            # Start point
+            profile_points.append((zone.start_radius, zone.start_pos))
+            # End point
+            profile_points.append((zone.end_radius, zone.end_pos))
+        
+        # Remove duplicates and sort by position
+        seen = set()
+        unique_points = []
+        for r, z in sorted(profile_points, key=lambda x: x[1]):
+            key = (round(r, 4), round(z, 4))
+            if key not in seen:
+                seen.add(key)
+                unique_points.append((r, z))
+        
+        # Generate Polyline
+        points_str = ", ".join([f"({r:.4f}, {z:.4f})" for r, z in unique_points])
+        lines.append(f"{indent}    points = [{points_str}]")
+        lines.append(f"{indent}    Polyline(*points)")
+        lines.append(f"{indent}    Line(profile.vertices[-1], profile.vertices[0])")  # Close
+        
+        # Revolve
+        lines.append(f"{indent}# Revolve to create shaft body")
+        lines.append(f"{indent}revolve(axis=Axis.Z)")
+        
+        return lines
+    
+    def _generate_feature_cut(
+        self,
+        feature: Any,
+        index: int,
+        indent: str
+    ) -> List[str]:
+        """Generate code for cutting a local feature."""
+        lines = []
+        ftype = feature.feature_type.value
+        
+        pos = feature.position
+        dims = feature.dimensions
+        
+        if ftype == "keyway":
+            width = dims.get("width", 2.0)
+            depth = dims.get("depth", 2.0)
+            length = dims.get("length", 10.0)
+            
+            lines.append(f"{indent}# Keyway cut {index}")
+            lines.append(f"{indent}with Locations(({pos[0]:.4f}, {pos[1]:.4f})):")
+            lines.append(f"{indent}    with BuildSketch() as keyway_{index}:")
+            lines.append(f"{indent}        Rectangle(width={width:.4f}, height={depth:.4f})")
+            lines.append(f"{indent}    extrude(amount={length:.4f}, mode=Mode.SUBTRACT)")
+        
+        elif ftype == "flat":
+            depth = dims.get("depth", 1.0)
+            width = dims.get("width", 10.0)
+            length = dims.get("length", 10.0)
+            
+            lines.append(f"{indent}# Flat cut {index}")
+            lines.append(f"{indent}with Locations(({pos[0]:.4f}, {pos[1]:.4f})):")
+            lines.append(f"{indent}    with BuildSketch() as flat_{index}:")
+            lines.append(f"{indent}        Rectangle(width={width:.4f}, height={depth:.4f})")
+            lines.append(f"{indent}    extrude(amount={length:.4f}, mode=Mode.SUBTRACT)")
+        
+        elif ftype == "cross_hole":
+            diameter = dims.get("diameter", 2.0)
+            
+            lines.append(f"{indent}# Cross hole {index}")
+            lines.append(f"{indent}with Locations(({pos[0]:.4f}, {pos[1]:.4f})):")
+            lines.append(f"{indent}    with BuildSketch() as hole_{index}:")
+            lines.append(f"{indent}        Circle(radius={diameter/2:.4f})")
+            lines.append(f"{indent}    extrude(amount={diameter*3:.4f}, mode=Mode.SUBTRACT)")
+        
+        return lines
+
+
+def create_coder_agent(
+    llm_client: Optional[Any] = None,
+    part_type: str = "generic"
+) -> callable:
     """Factory function for creating Coder agent.
 
     Returns a function that can be used by the LangGraph orchestrator.
 
     Args:
         llm_client: Optional LLM client.
+        part_type: Type of part ("generic" or "shaft").
 
     Returns:
         Coder function: state -> code string.
@@ -294,6 +484,9 @@ def create_coder_agent(llm_client: Optional[Any] = None) -> callable:
     agent = CoderAgent(llm_client=llm_client)
     
     def coder_fn(state: CADState) -> str:
-        return agent.generate_code(state)
+        if part_type == "shaft" and state.shaft_construction_plan:
+            return agent.generate_shaft_code(state)
+        else:
+            return agent.generate_code(state)
     
     return coder_fn

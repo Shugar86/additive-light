@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from collections import defaultdict
 
 from backend.core.state import CADState, Axis, SliceReport, Feature3D, BuildStep
+from backend.core.state import ShaftConstructionPlan, ShaftZoneSpec, ShaftZoneType, AxisSpec, LocalFeatureSpec, LocalFeatureType, MeasurementLogEntry
 from backend.core.config import settings
 from backend.core.agent_prompt_compiler import get_prompt_compiler
 
@@ -583,14 +584,285 @@ class CoordinatorAgent:
         
         return plan
 
+    # =============================================================================
+    # Shaft MVP: Dedicated shaft pipeline
+    # =============================================================================
 
-def create_coordinator_agent(llm_client: Optional[Any] = None) -> callable:
+    def analyze_shaft(
+        self,
+        mesh_path: str,
+        state: CADState
+    ) -> Dict[str, Any]:
+        """Run the dedicated shaft sensor pipeline.
+        
+        This is the main entry point for shaft reverse engineering.
+        Uses hard math (no LLM) to detect axis, profile, zones, and features.
+        
+        Args:
+            mesh_path: Path to the aligned mesh file.
+            state: Current CAD state.
+        
+        Returns:
+            Dictionary with:
+            - shaft_construction_plan: ShaftConstructionPlan object
+            - features: List of Feature3D for compatibility
+            - plan: List of BuildStep for compatibility
+        """
+        import datetime
+        from backend.sensors.shaft_axis import detect_main_axis, align_mesh_to_axis
+        from backend.sensors.shaft_profile import extract_shaft_segments
+        from backend.sensors.shaft_features import detect_keyways_flats_holes
+        
+        logger.info("[CoordinatorAgent] Starting shaft pipeline analysis")
+        
+        measurement_log: List[MeasurementLogEntry] = []
+        
+        try:
+            # Step 1: Detect and align to main axis
+            logger.info("[ShaftPipeline] Step 1: Detecting main axis")
+            axis_info = detect_main_axis(mesh_path)
+            
+            measurement_log.append(MeasurementLogEntry(
+                timestamp=datetime.datetime.now().isoformat(),
+                operation="detect_main_axis",
+                status="success",
+                details=axis_info.to_dict()
+            ))
+            
+            # Align mesh to axis if needed
+            aligned_path, aligned_axis_info = align_mesh_to_axis(mesh_path)
+            
+            # Step 2: Extract shaft profile and segments
+            logger.info("[ShaftPipeline] Step 2: Extracting profile and segments")
+            profile, zones = extract_shaft_segments(aligned_path, axis="Z", num_samples=100)
+            
+            measurement_log.append(MeasurementLogEntry(
+                timestamp=datetime.datetime.now().isoformat(),
+                operation="extract_profile",
+                status="success",
+                details={
+                    "total_length": profile.total_length,
+                    "min_radius": profile.min_radius,
+                    "max_radius": profile.max_radius,
+                    "zone_count": len(zones)
+                }
+            ))
+            
+            # Step 3: Detect local features (keyways, flats, holes)
+            logger.info("[ShaftPipeline] Step 3: Detecting local features")
+            segments_dict = [z.to_dict() for z in zones]
+            features = detect_keyways_flats_holes(
+                aligned_path,
+                axis_info.to_dict(),
+                segments_dict
+            )
+            
+            measurement_log.append(MeasurementLogEntry(
+                timestamp=datetime.datetime.now().isoformat(),
+                operation="detect_features",
+                status="success",
+                details={"feature_count": len(features)}
+            ))
+            
+            # Step 4: Build construction plan
+            logger.info("[ShaftPipeline] Step 4: Building construction plan")
+            construction_plan = self._build_shaft_construction_plan(
+                axis_info, profile, zones, features, measurement_log
+            )
+            
+            # Validate the plan
+            validation_errors = construction_plan.validate_geometry()
+            if validation_errors:
+                logger.warning(f"[ShaftPipeline] Validation errors: {validation_errors}")
+            
+            # Convert zones and features to old format for compatibility
+            features_3d = self._convert_shaft_to_features3d(zones, features)
+            build_steps = self._convert_shaft_to_buildsteps(zones, features)
+            
+            logger.info(f"[ShaftPipeline] Complete: {len(zones)} zones, {len(features)} features, "
+                       f"confidence={construction_plan.confidence:.3f}")
+            
+            return {
+                "shaft_construction_plan": construction_plan,
+                "features": features_3d,
+                "plan": build_steps
+            }
+            
+        except Exception as e:
+            logger.error(f"[ShaftPipeline] Analysis failed: {e}")
+            measurement_log.append(MeasurementLogEntry(
+                timestamp=datetime.datetime.now().isoformat(),
+                operation="shaft_pipeline",
+                status="failed",
+                details={"error": str(e)}
+            ))
+            return {
+                "shaft_construction_plan": None,
+                "features": [],
+                "plan": [],
+                "error": str(e)
+            }
+    
+    def _build_shaft_construction_plan(
+        self,
+        axis_info: Any,
+        profile: Any,
+        zones: List[Any],
+        features: List[Any],
+        measurement_log: List[MeasurementLogEntry]
+    ) -> ShaftConstructionPlan:
+        """Build the strict ShaftConstructionPlan from detected data."""
+        
+        # Build axis spec
+        axis_spec = AxisSpec(
+            direction=axis_info.direction.tolist(),
+            origin=axis_info.origin.tolist(),
+            confidence=axis_info.confidence,
+            length=axis_info.length
+        )
+        
+        # Build zone specs
+        zone_specs = []
+        for zone in zones:
+            zone_type = ShaftZoneType(zone.zone_type.value)
+            
+            spec = ShaftZoneSpec(
+                zone_type=zone_type,
+                start_pos=zone.start_pos,
+                end_pos=zone.end_pos,
+                start_radius=zone.start_radius,
+                end_radius=zone.end_radius,
+                mean_radius=zone.mean_radius,
+                confidence=zone.confidence
+            )
+            
+            # Add zone-specific metadata
+            if zone_type == ShaftZoneType.CHAMFER and "chamfer_angle" in zone.metadata:
+                spec.chamfer_angle = zone.metadata["chamfer_angle"]
+            elif zone_type == ShaftZoneType.FILLET and "fillet_radius" in zone.metadata:
+                spec.fillet_radius = zone.metadata["fillet_radius"]
+            
+            zone_specs.append(spec)
+        
+        # Build feature specs
+        feature_specs = []
+        for feature in features:
+            feature_type = LocalFeatureType(feature.feature_type.value)
+            
+            spec = LocalFeatureSpec(
+                feature_type=feature_type,
+                position=feature.position.tolist(),
+                orientation=feature.orientation.tolist(),
+                dimensions=feature.dimensions,
+                confidence=feature.confidence,
+                zone_index=feature.zone_index
+            )
+            feature_specs.append(spec)
+        
+        # Compute overall confidence
+        if zone_specs:
+            zone_confidences = [z.confidence for z in zone_specs]
+            mean_confidence = sum(zone_confidences) / len(zone_confidences)
+        else:
+            mean_confidence = 0.5
+        
+        return ShaftConstructionPlan(
+            part_type="shaft",
+            base_axis=axis_spec,
+            segments=zone_specs,
+            features=feature_specs,
+            fillets=[],  # Extracted from zones if needed
+            chamfers=[],  # Extracted from zones if needed
+            confidence=mean_confidence * axis_info.confidence,
+            measurement_log=measurement_log
+        )
+    
+    def _convert_shaft_to_features3d(
+        self,
+        zones: List[Any],
+        features: List[Any]
+    ) -> List[Feature3D]:
+        """Convert shaft zones and features to Feature3D format for compatibility."""
+        features_3d = []
+        
+        # Convert zones to cylinders
+        for zone in zones:
+            if zone.zone_type.value == "cylinder":
+                feature = Feature3D(
+                    feature_type="cylinder",
+                    position=[0, 0, (zone.start_pos + zone.end_pos) / 2],
+                    orientation=[0, 0, 1],
+                    dimensions={
+                        "radius": zone.mean_radius,
+                        "height": zone.end_pos - zone.start_pos
+                    },
+                    confidence=zone.confidence
+                )
+                features_3d.append(feature)
+        
+        # Convert local features
+        for feature in features:
+            feature_3d = Feature3D(
+                feature_type=feature.feature_type.value,
+                position=feature.position.tolist(),
+                orientation=feature.orientation.tolist(),
+                dimensions=feature.dimensions,
+                confidence=feature.confidence,
+                evidence=feature.evidence
+            )
+            features_3d.append(feature_3d)
+        
+        return features_3d
+    
+    def _convert_shaft_to_buildsteps(
+        self,
+        zones: List[Any],
+        features: List[Any]
+    ) -> List[BuildStep]:
+        """Convert shaft data to BuildStep format for compatibility."""
+        steps = []
+        step_num = 1
+        
+        # Find main body (largest cylinder)
+        cylinders = [z for z in zones if z.zone_type.value == "cylinder"]
+        if cylinders:
+            main_cylinder = max(cylinders, key=lambda z: z.mean_radius)
+            
+            steps.append(BuildStep(
+                step_number=step_num,
+                operation="base_sketch",
+                description=f"Base circle radius={main_cylinder.mean_radius:.3f}",
+                parameters={"radius": main_cylinder.mean_radius},
+                dependencies=[]
+            ))
+            step_num += 1
+        
+        # Add steps for each feature
+        for feature in features:
+            if feature.feature_type.value in ("keyway", "flat"):
+                steps.append(BuildStep(
+                    step_number=step_num,
+                    operation="cut",
+                    description=f"{feature.feature_type.value} cut",
+                    parameters=feature.dimensions,
+                    dependencies=[1]
+                ))
+                step_num += 1
+        
+        return steps
+
+
+def create_coordinator_agent(
+    llm_client: Optional[Any] = None,
+    part_type: str = "generic"
+) -> callable:
     """Factory function for creating Coordinator agent.
 
     Returns a function that can be used by the LangGraph orchestrator.
 
     Args:
         llm_client: Optional LLM client.
+        part_type: Type of part to analyze ("generic" or "shaft").
 
     Returns:
         Coordinator function: state -> dict.
@@ -598,6 +870,14 @@ def create_coordinator_agent(llm_client: Optional[Any] = None) -> callable:
     agent = CoordinatorAgent(llm_client=llm_client)
     
     def coordinator_fn(state: CADState) -> Dict[str, Any]:
-        return agent.analyze(state)
+        # Route to appropriate analysis method
+        if part_type == "shaft":
+            if not state.aligned_mesh_path:
+                logger.error("[Coordinator] No aligned mesh for shaft analysis")
+                return {"shaft_construction_plan": None, "features": [], "plan": []}
+            return agent.analyze_shaft(state.aligned_mesh_path, state)
+        else:
+            # Default generic analysis
+            return agent.analyze(state)
     
     return coordinator_fn
