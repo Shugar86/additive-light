@@ -366,7 +366,32 @@ def _find_zone_boundaries(
     # Remove duplicates and sort
     boundaries = sorted(set(boundaries))
     
-    return boundaries
+    # Task 2.1: Suppression of close boundaries
+    # If boundaries are closer than 3% of total length, keep only the one with higher radius change
+    total_length = positions[-1] - positions[0]
+    min_distance = total_length * 0.03
+    
+    filtered_boundaries = [boundaries[0]]  # Keep first
+    
+    for i in range(1, len(boundaries)):
+        prev_idx = filtered_boundaries[-1]
+        curr_idx = boundaries[i]
+        
+        pos_diff = abs(positions[curr_idx] - positions[prev_idx])
+        
+        if pos_diff < min_distance:
+            # Boundaries too close - keep the one with higher radius change
+            prev_radius_change = abs(radii[prev_idx] - radii[max(0, prev_idx - 1)])
+            curr_radius_change = abs(radii[curr_idx] - radii[max(0, curr_idx - 1)])
+            
+            if curr_radius_change > prev_radius_change:
+                # Replace previous with current
+                filtered_boundaries[-1] = curr_idx
+            # else keep previous, skip current
+        else:
+            filtered_boundaries.append(curr_idx)
+    
+    return filtered_boundaries
 
 
 def _classify_zone(
@@ -418,11 +443,10 @@ def _classify_zone(
     elif max_dr > slope_threshold * 0.5 and mean_d2r < 0.05:
         zone_type = ZoneType.CHAMFER
         # Compute chamfer angle
+        chamfer_angle = 0.0  # Task 2.2: Always declare before if
         length = end_pos - start_pos
         if length > 0:
             chamfer_angle = np.degrees(np.arctan2(abs(end_radius - start_radius), length))
-        else:
-            chamfer_angle = 0
         confidence = 0.7 + 0.3 * (1.0 - abs(chamfer_angle - 45) / 45)  # Higher confidence near 45°
     
     # 5. Default to cylinder if mostly circular
@@ -447,7 +471,7 @@ def _classify_zone(
     }
     
     if zone_type == ZoneType.CHAMFER:
-        metadata["chamfer_angle_deg"] = chamfer_angle if 'chamfer_angle' in dir() else 0
+        metadata["chamfer_angle_deg"] = chamfer_angle  # Task 2.2: Always defined
     
     return ShaftZone(
         zone_type=zone_type,
@@ -515,6 +539,7 @@ def _detect_grooves(
     
     for i, zone in enumerate(zones):
         is_groove_candidate = False
+        neighbor_avg = zone.mean_radius  # Task 2.3: Always define neighbor_avg
         
         # Check if this zone has much smaller radius than neighbors
         if 0 < i < len(zones) - 1:
@@ -530,7 +555,7 @@ def _detect_grooves(
         if is_groove_candidate and zone_length < profile.total_length * 0.15:
             zone.zone_type = ZoneType.GROOVE
             zone.confidence = 0.8
-            zone.metadata["depth_reduction"] = 1.0 - zone.mean_radius / neighbor_avg if 'neighbor_avg' in dir() else 0
+            zone.metadata["depth_reduction"] = 1.0 - zone.mean_radius / neighbor_avg  # Task 2.3: Always defined
         
         updated_zones.append(zone)
     
@@ -632,9 +657,15 @@ def build_revolve_profile(
             points.append((zone.start_pos, zone.end_radius))
         
         elif zone.zone_type == ZoneType.GROOVE:
-            # Groove: reduced radius section
-            points.append((zone.start_pos, zone.mean_radius))
-            points.append((zone.end_pos, zone.mean_radius))
+            # Task 2.4: GROOVE needs 4 points to preserve geometry
+            groove_depth_radius = zone.mean_radius
+            epsilon = (zone.end_pos - zone.start_pos) * 0.1
+            
+            # 4 points: entry, descent, bottom, exit
+            points.append((zone.start_pos, zone.start_radius))  # entry
+            points.append((zone.start_pos + epsilon, groove_depth_radius))  # descent
+            points.append((zone.end_pos - epsilon, groove_depth_radius))  # bottom
+            points.append((zone.end_pos, zone.end_radius))  # exit
     
     # Remove duplicates and sort by position
     points = sorted(set(points), key=lambda p: p[0])

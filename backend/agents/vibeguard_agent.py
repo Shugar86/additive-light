@@ -627,6 +627,19 @@ class VibeGuardAgent:
             "suggestions": []
         }
         
+        # Task 4.1: Determine error_type based on comparison metrics
+        chamfer = comparison_result.get("chamfer_distance")
+        hausdorff = comparison_result.get("hausdorff_distance")
+        
+        if chamfer is not None and chamfer > self.chamfer_tolerance * 2:
+            error_type = "geometry"
+        elif chamfer is not None and chamfer > self.chamfer_tolerance:
+            error_type = "tolerance"
+        elif comparison_result.get("sdf_metrics", {}).get("volume_error", 0) > 0.3:
+            error_type = "missing_feature"
+        else:
+            error_type = "geometry"
+        
         # Compute bbox and volume metrics
         try:
             import trimesh
@@ -657,31 +670,48 @@ class VibeGuardAgent:
         except Exception as e:
             logger.warning(f"[VibeGuard] Could not compute detailed metrics: {e}")
         
-        # Format errors for reflection
+        # Format errors for reflection - Task 4.1: enriched structure
         for error in comparison_result.get("errors", []):
-            reflection["errors"].append({
+            # Determine z_range from error location if available
+            location = error.get("location")
+            if isinstance(location, list) and len(location) >= 3:
+                z_range = [location[2] - 5.0, location[2] + 5.0]  # +/- 5 units around error
+            else:
+                z_range = [0, reflection["metrics"].get("bbox_delta", [[0,0,0],[0,0,0]])[2][1] if reflection["metrics"].get("bbox_delta") else 100]
+            
+            enriched_error = {
+                "error_type": error_type,  # Task 4.1: one of ["syntax", "geometry", "tolerance", "missing_feature"]
                 "type": error.get("type", "unknown"),
                 "description": error.get("description", ""),
                 "severity": error.get("severity", "medium"),
-                "location": error.get("location"),
-                "suggestion": error.get("suggestion", "")
-            })
+                "location": location,
+                "z_range": z_range,  # Task 4.1: [start, end] where error detected
+                "failing_operation": "revolve" if "cylinder" in error.get("description", "").lower() else "cut",  # Task 4.1: build123d operation name
+                "expected_vs_actual": {  # Task 4.1: expected vs actual values
+                    "expected": "within tolerance",
+                    "actual": f"chamfer={chamfer:.4f}, hausdorff={hausdorff:.4f}" if chamfer and hausdorff else "unknown"
+                },
+                "suggestion": error.get("suggestion", "Review construction plan parameters")
+            }
+            reflection["errors"].append(enriched_error)
         
-        # Generate high-level suggestions
+        # Generate high-level suggestions - Task 4.1: structured for Coder Agent
         if not reflection["validation_passed"]:
             chamfer = reflection["metrics"]["chamfer_distance"]
             if chamfer and chamfer > self.chamfer_tolerance * 2:
                 reflection["suggestions"].append({
                     "priority": 1,
                     "action": "verify_base_dimensions",
-                    "description": "Global dimensions may be incorrect - verify cylinder radii and lengths"
+                    "description": "Global dimensions may be incorrect - verify cylinder radii and lengths",
+                    "suggestion": "Increase revolve profile radius by 10% and regenerate STEP file"  # Task 4.1: specific for Coder
                 })
             
             if reflection["metrics"]["volume_delta"] and abs(reflection["metrics"]["volume_delta"]) > 0.3:
                 reflection["suggestions"].append({
                     "priority": 2,
                     "action": "check_feature_cuts",
-                    "description": "Volume mismatch detected - verify all holes and cuts are properly applied"
+                    "description": "Volume mismatch detected - verify all holes and cuts are properly applied",
+                    "suggestion": "Ensure all Mode.SUBTRACT operations use correct depth parameters"  # Task 4.1: specific for Coder
                 })
             
             # Check for specific error types
@@ -690,7 +720,8 @@ class VibeGuardAgent:
                 reflection["suggestions"].append({
                     "priority": 3,
                     "action": "refine_local_features",
-                    "description": "Local geometry deviations detected - review keyway/flat positions and dimensions"
+                    "description": "Local geometry deviations detected - review keyway/flat positions and dimensions",
+                    "suggestion": "Adjust keyway/flat position by moving cut location along shaft axis"  # Task 4.1: specific for Coder
                 })
         
         return reflection

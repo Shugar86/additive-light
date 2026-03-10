@@ -18,11 +18,18 @@ import sys
 import os
 import json
 import pytest
+import numpy as np
 from pathlib import Path
 from typing import Dict, Any
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Try to import trimesh
+try:
+    import trimesh
+except ImportError:
+    trimesh = None  # type: ignore
 
 # Test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -44,6 +51,39 @@ FIXTURES = [
 
 class TestSensorContract:
     """Test shaft sensor modules produce correct contract outputs."""
+    
+    def test_symmetry_score_performance(self):
+        """Task 5.1: Test KDTree optimization is fast enough."""
+        import time
+        from backend.sensors.shaft_axis import _compute_symmetry_score
+        
+        # Generate 1000 random points
+        np.random.seed(42)
+        points = np.random.randn(1000, 3)
+        axis = np.array([0, 0, 1])
+        center = np.array([0, 0, 0])
+        
+        start = time.time()
+        score = _compute_symmetry_score(points, axis, center, num_angles=6)
+        elapsed = time.time() - start
+        
+        assert elapsed < 2.0, f"Symmetry score took {elapsed:.2f}s, expected < 2s"
+        assert score >= 0.0 and score <= 1.0
+    
+    def test_circularity_no_private_api(self):
+        """Task 5.2: Test circularity works without _polygon attribute."""
+        if trimesh is None:
+            pytest.skip("trimesh not installed")
+        
+        from backend.sensors.shaft_axis import _compute_slice_circularity_score
+        
+        # Create synthetic cylinder using trimesh
+        mesh = trimesh.creation.cylinder(radius=10, height=50, sections=32)
+        
+        axis = np.array([0, 0, 1])
+        score = _compute_slice_circularity_score(mesh, axis, sample_count=10)
+        
+        assert score > 0.8, f"Expected circularity > 0.8 for cylinder, got {score}"
     
     def test_shaft_axis_detection(self):
         """Test detect_main_axis returns correct axis info structure."""

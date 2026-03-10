@@ -120,6 +120,15 @@ def detect_main_axis(
         logger.info(f"[detect_main_axis] Detected axis: method={axis_info.method}, "
                    f"confidence={axis_info.confidence:.3f}, length={axis_info.length:.3f}")
         
+        # Task 1.3: Add warning for low confidence
+        if axis_info.confidence < 0.5:
+            logger.warning(
+                f"Low confidence ({axis_info.confidence:.2f}). "
+                f"Mesh may not be axis-aligned. "
+                f"Consider calling align_mesh_to_axis() before detect_main_axis()."
+            )
+            axis_info.method += "_low_confidence"
+        
         return axis_info
         
     except Exception as e:
@@ -128,7 +137,7 @@ def detect_main_axis(
 
 
 def _detect_by_symmetry(
-    mesh: o3d.geometry.TriangleMesh,
+    mesh: Any,
     centroid: npt.NDArray[np.float64]
 ) -> AxisInfo:
     """Detect axis by analyzing rotational symmetry.
@@ -183,9 +192,15 @@ def _compute_symmetry_score(
     """Compute rotational symmetry score around an axis.
     
     Higher score means more symmetric (more shaft-like).
+    Uses KDTree for efficient nearest neighbor search.
     """
+    from scipy.spatial import KDTree
+    
     # Center points
     centered = points - center
+    
+    # Build KDTree once for efficient nearest neighbor queries
+    kdtree = KDTree(centered)
     
     # Test multiple rotation angles
     angles = np.linspace(0, 2 * np.pi, num_angles, endpoint=False)[1:]  # Skip 0
@@ -202,17 +217,15 @@ def _compute_symmetry_score(
         # Rotate points
         rotated = centered @ R.T
         
-        # Compute Chamfer-like distance (average min distance)
+        # Compute Chamfer-like distance using KDTree
         # For efficiency, sample subset
         sample_indices = np.random.choice(len(rotated), min(500, len(rotated)), replace=False)
         rotated_sample = rotated[sample_indices]
         
-        distances = []
-        for p in rotated_sample:
-            dists = np.sqrt(np.sum((centered - p) ** 2, axis=1))
-            distances.append(np.min(dists))
-        
+        # Batch query KDTree for nearest neighbors
+        distances, _ = kdtree.query(rotated_sample, k=1)
         mean_distance = np.mean(distances)
+        
         # Convert to score (lower distance = higher score)
         score = 1.0 / (1.0 + mean_distance * 10)
         total_score += score
@@ -221,7 +234,7 @@ def _compute_symmetry_score(
 
 
 def _detect_by_slice_analysis(
-    mesh: o3d.geometry.TriangleMesh,
+    mesh: Any,
     centroid: npt.NDArray[np.float64],
     sample_count: int = 50
 ) -> AxisInfo:
@@ -285,8 +298,11 @@ def _compute_slice_circularity_score(
     """Compute circularity score by slicing mesh perpendicular to axis.
     
     Returns average circularity of cross-sections (1.0 = perfect circles).
+    Uses Shapely Polygon instead of private _polygon attribute.
     """
     try:
+        from shapely.geometry import Polygon as ShapelyPolygon
+        
         # Get bounds along axis
         vertices = mesh.vertices
         projections = vertices @ axis
@@ -313,12 +329,20 @@ def _compute_slice_circularity_score(
             # Compute circularity for each closed loop
             for entity in slice_result.entities:
                 if hasattr(entity, 'points') and len(entity.points) >= 3:
+                    # Build Shapely Polygon from entity points
                     points = slice_result.vertices[entity.points]
+                    
+                    # Create Shapely polygon
+                    poly = ShapelyPolygon(points)
+                    
+                    # Skip invalid polygons
+                    if not poly.is_valid or poly.is_empty:
+                        continue
                     
                     # Compute circularity = 4*pi*Area / Perimeter^2
                     # For a circle, this equals 1.0
-                    area = entity._polygon.area
-                    perimeter = entity._polygon.length
+                    area = poly.area
+                    perimeter = poly.length
                     
                     if perimeter > 0:
                         circularity = (4 * np.pi * area) / (perimeter ** 2)
@@ -336,7 +360,7 @@ def _compute_slice_circularity_score(
 
 
 def _detect_by_inertia(
-    mesh: o3d.geometry.TriangleMesh,
+    mesh: Any,
     centroid: npt.NDArray[np.float64]
 ) -> AxisInfo:
     """Detect axis using moment of inertia (PCA).
@@ -395,7 +419,7 @@ def _detect_by_inertia(
 
 
 def _compute_length_along_axis(
-    mesh: o3d.geometry.TriangleMesh,
+    mesh: Any,
     axis: npt.NDArray[np.float64],
     center: npt.NDArray[np.float64]
 ) -> float:
@@ -466,8 +490,12 @@ def align_mesh_to_axis(
     
     # Save aligned mesh
     if output_path is None:
-        temp_dir = Path("temp")
-        temp_dir.mkdir(exist_ok=True)
+        # Task 3.1: Use tempfile instead of hardcoded path
+        import tempfile
+        import os
+        temp_base = Path(os.getenv("TEMP_DIR", tempfile.gettempdir()))
+        temp_dir = temp_base / "additive_light_align"
+        temp_dir.mkdir(parents=True, exist_ok=True)
         mesh_file = Path(mesh_path)
         output_path = str(temp_dir / f"axis_aligned_{mesh_file.stem}.stl")
     
@@ -529,4 +557,11 @@ def verify_axis_alignment(
         
     except Exception as e:
         logger.warning(f"[verify_axis_alignment] Verification failed: {e}")
-        return {"verified": False, "error": str(e)}
+        # Task 1.4: Enrich return on error
+        return {
+            "verified": False,
+            "error": str(e),
+            "exception_type": type(e).__name__,
+            "suggestion": "Run align_mesh_to_axis() before verification",
+            "fallback_axis": axis_info.to_dict() if axis_info else None
+        }
