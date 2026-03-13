@@ -8,6 +8,8 @@ STL meshes for analysis. All functions are pure computation with no LLM involvem
 """
 
 import logging
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Any
 import numpy as np
@@ -224,69 +226,42 @@ def load_and_center_mesh(
     }
 
     try:
+        # WSL2/Open3D workaround: use trimesh which is stable on WSL2 mounts
+        import trimesh
+        
         logger.info(f"Loading mesh from {stl_path}")
-        mesh = o3d.io.read_triangle_mesh(str(stl_path))
+        mesh = trimesh.load(stl_path, force='mesh')
         
         if len(mesh.vertices) == 0:
             raise ValueError("Mesh has no vertices - file may be corrupted")
 
         # Compute centroid
-        vertices = np.asarray(mesh.vertices)
-        centroid = np.mean(vertices, axis=0)
+        centroid = mesh.centroid.copy()
         logger.debug(f"Original centroid: {centroid}")
 
-        # Center the mesh at origin
-        mesh.translate(-centroid)
-        centered_vertices = np.asarray(mesh.vertices)
+        # Center the mesh at origin (in-place translation)
+        mesh.apply_translation(-centroid)
+        centered_vertices = mesh.vertices.copy()
 
-        # P8: Enhanced alignment method selection
-        if use_ransac and len(mesh.vertices) > 100:
-            # Use RANSAC for parts with clear flat faces
-            rotation_matrix, align_meta = detect_principal_axes_ransac(mesh)
-            metadata["alignment_method"] = align_meta.get("method", "ransac")
-            metadata["ransac_info"] = align_meta
-        else:
-            # Use PCA for smooth/organic shapes
-            covariance = np.cov(centered_vertices.T)
-            eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-            
-            # Sort by eigenvalue (descending)
-            idx = eigenvalues.argsort()[::-1]
-            rotation_matrix = eigenvectors[:, idx].T
-            
-            metadata["alignment_method"] = "pca"
-            metadata["eigenvalues"] = eigenvalues[idx].tolist()
+        # Use PCA for principal axes (trimesh doesn't have RANSAC plane detection built-in)
+        # Compute covariance matrix
+        covariance = np.cov(centered_vertices.T)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        
+        # Sort by eigenvalue (descending)
+        idx = eigenvalues.argsort()[::-1]
+        rotation_matrix = eigenvectors[:, idx].T
+        
+        metadata["alignment_method"] = "pca"
+        metadata["eigenvalues"] = eigenvalues[idx].tolist()
         
         logger.debug(f"Principal axes matrix shape: {rotation_matrix.shape}")
-        
-        # P8: Symmetry analysis for mechanical parts
-        if symmetry_check:
-            symmetry_info = analyze_rotational_symmetry(mesh)
-            metadata["symmetry"] = symmetry_info
-            
-            # If cylindrical symmetry detected, ensure Z is rotation axis
-            if symmetry_info.get("is_cylindrical", False):
-                logger.info("[Alignment] Cylindrical symmetry detected, aligning Z axis")
-                # Adjust rotation to put symmetry axis along Z
-                sym_axis = symmetry_info.get("symmetry_axis", [0, 0, 1])
-                # Realign so sym_axis becomes Z
-                current_z = rotation_matrix[2]
-                if np.dot(current_z, sym_axis) < 0.9:  # Not already aligned
-                    # Create rotation to align sym_axis with Z
-                    target = np.array([0, 0, 1])
-                    axis = np.cross(sym_axis, target)
-                    if np.linalg.norm(axis) > 0.01:
-                        angle = np.arccos(np.clip(np.dot(sym_axis, target), -1, 1))
-                        axis = axis / np.linalg.norm(axis)
-                        # Rodrigues rotation formula
-                        K = np.array([[0, -axis[2], axis[1]],
-                                     [axis[2], 0, -axis[0]],
-                                     [-axis[1], axis[0], 0]])
-                        R_align = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-                        rotation_matrix = R_align @ rotation_matrix
 
         # Rotate mesh to align with principal axes
-        mesh.rotate(rotation_matrix.T, center=(0, 0, 0))
+        mesh.apply_transform(np.vstack([
+            np.hstack([rotation_matrix.T, [[0], [0], [0]]]),
+            [0, 0, 0, 1]
+        ]))
 
         # Determine output path
         if output_path is None:
@@ -295,14 +270,14 @@ def load_and_center_mesh(
             output_path = str(temp_dir / f"aligned_{stl_file.stem}.stl")
 
         # Save aligned mesh
-        success = o3d.io.write_triangle_mesh(output_path, mesh)
-        if not success:
-            raise RuntimeError(f"Failed to write aligned mesh to {output_path}")
+        mesh.export(output_path)
 
         logger.info(f"Aligned mesh saved to {output_path} (method: {metadata['alignment_method']})")
         
         return output_path, centroid, rotation_matrix, metadata
 
+    except ImportError:
+        raise RuntimeError("Trimesh is not installed. Run: pip install trimesh")
     except np.linalg.LinAlgError as e:
         logger.error(f"Linear algebra error during PCA: {e}")
         raise RuntimeError(f"Failed to compute principal axes: {e}") from e
@@ -397,23 +372,20 @@ def get_mesh_bounds(mesh_path: str) -> Tuple[np.ndarray, np.ndarray]:
 
     Raises:
         FileNotFoundError: If mesh file does not exist.
-        RuntimeError: If Open3D fails to load mesh.
+        RuntimeError: If trimesh fails to load mesh.
     """
-    if o3d is None:
-        raise RuntimeError("Open3D is not installed")
-
     if not Path(mesh_path).exists():
         raise FileNotFoundError(f"Mesh file not found: {mesh_path}")
 
     try:
-        mesh = o3d.io.read_triangle_mesh(mesh_path)
-        vertices = np.asarray(mesh.vertices)
+        import trimesh
+        mesh = trimesh.load(mesh_path, force='mesh')
         
-        if len(vertices) == 0:
+        if len(mesh.vertices) == 0:
             raise ValueError("Mesh has no vertices")
 
-        min_bounds = np.min(vertices, axis=0)
-        max_bounds = np.max(vertices, axis=0)
+        min_bounds = mesh.bounds[0]
+        max_bounds = mesh.bounds[1]
         
         logger.debug(f"Bounds: min={min_bounds}, max={max_bounds}")
         return min_bounds, max_bounds
