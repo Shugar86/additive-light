@@ -78,7 +78,9 @@ def fit_cylinder(
     rms = float(np.sqrt(np.mean(residuals ** 2)))
 
     ss_tot = float(np.sum((rad - r_mean) ** 2))
-    r_squared = 1.0 if ss_tot < 1e-12 else 0.0  # perfect constant fit has r²=1
+    # r² for a constant fit: 1 when data is perfectly constant, degrades otherwise
+    r_squared = 1.0 if ss_tot < 1e-12 else float(1.0 - np.sum(residuals ** 2) / ss_tot)
+    r_squared = max(0.0, r_squared)
 
     # Confidence: penalised by relative radius variation
     r_range = float(np.max(rad) - np.min(rad))
@@ -208,9 +210,10 @@ def fit_arc(
     ss_res = float(np.sum((rad - r_pred) ** 2))
     r_squared = float(max(0.0, 1.0 - ss_res / (ss_tot + 1e-12)))
 
-    # Confidence penalised by rms relative to arc_radius
-    confidence = float(max(0.0, 1.0 - rms / (arc_radius * 0.1 + 1e-10)))
-    confidence = min(1.0, confidence)
+    # Confidence penalised by rms relative to arc_radius.
+    # Factor 0.3 (instead of 0.1) prevents small-radius arcs from being
+    # unfairly penalised when rms is modest.
+    confidence = float(max(0.0, min(1.0, 1.0 - rms / (arc_radius * 0.3 + 1e-10))))
 
     # Angular span of the arc
     angles = np.degrees(np.arctan2(rad - cy, pos - cx))
@@ -327,12 +330,19 @@ def fit_all_zones(
     """
     results: List[Tuple[object, FitResult]] = []
 
-    for zone in zones:
-        # Collect samples belonging to this zone
+    for idx, zone in enumerate(zones):
+        is_last = idx == len(zones) - 1
+        # Use a half-open interval [start, end) so that a boundary sample
+        # shared between two consecutive zones is assigned to the left zone
+        # only.  The final zone uses a closed interval [start, end] to capture
+        # the very last profile sample.
         zone_samples = [
             s
             for s in profile_samples
-            if zone.start_pos <= s.position <= zone.end_pos  # type: ignore[attr-defined]
+            if (
+                zone.start_pos <= s.position < zone.end_pos  # type: ignore[attr-defined]
+                or (is_last and s.position == zone.end_pos)  # type: ignore[attr-defined]
+            )
         ]
 
         if not zone_samples:

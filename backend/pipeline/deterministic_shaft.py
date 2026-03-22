@@ -496,14 +496,16 @@ def run_deterministic_pipeline(
             code, out_path, timeout_s=execution_timeout_s
         )
         if exec_result["success"]:
-            step_path = out_path / "shaft.step"
-            stl_preview_path = out_path / "shaft_preview.stl"
-            result.output_step_path = (
-                str(step_path) if step_path.exists() else None
+            # Use glob so the pipeline works regardless of the exact filename
+            # the generated script chose for its export.
+            step_files = list(out_path.glob("*.step")) + list(out_path.glob("*.STEP"))
+            stl_files = (
+                list(out_path.glob("*preview*.stl"))
+                or list(out_path.glob("*preview*.STL"))
+                or list(out_path.glob("*.stl"))
             )
-            result.output_stl_path = (
-                str(stl_preview_path) if stl_preview_path.exists() else None
-            )
+            result.output_step_path = str(step_files[0]) if step_files else None
+            result.output_stl_path = str(stl_files[0]) if stl_files else None
             result.success = result.output_step_path is not None
             logger.info(
                 "[deterministic_pipeline] build123d executed OK. STEP: %s",
@@ -554,6 +556,34 @@ def run_deterministic_pipeline(
             }
             for z, f in zone_fits
         ]
+
+    # ── 9b. Reconstruction quality metrics ──────────────────────────────────
+    # Compare the input mesh profile against the reconstructed preview STL.
+    # This is a warning signal only — a low-confidence reconstruction is still
+    # reported as success=True because the STEP file was produced.
+    if result.output_stl_path and Path(result.output_stl_path).exists():
+        try:
+            from backend.pipeline.profile_metrics import compare_stl_files
+
+            metrics = compare_stl_files(
+                working_path, result.output_stl_path, num_samples=100
+            )
+            result.report["reconstruction_metrics"] = metrics.to_dict()
+            logger.info(
+                "[deterministic_pipeline] Reconstruction metrics: "
+                "rmse=%.3fmm iou=%.4f conf=%.3f",
+                metrics.rmse_mm,
+                metrics.iou_proxy,
+                metrics.confidence,
+            )
+            if metrics.confidence < 0.3:
+                result.errors.append(
+                    f"Low reconstruction confidence: {metrics.confidence:.3f} "
+                    f"(rmse={metrics.rmse_mm:.3f}mm)"
+                )
+        except Exception as exc:
+            result.errors.append(f"Metrics comparison failed (non-fatal): {exc}")
+            logger.debug("[deterministic_pipeline] Metrics comparison: %s", exc)
 
     # Save report JSON
     report_path = out_path / f"{stl_file.stem}_report.json"
