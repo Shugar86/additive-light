@@ -207,7 +207,33 @@ Priority bodies for R&D validation:
 
 ---
 
-## 7. Technical Risks
+## 7. Benchmark Kit
+
+Ground-truth STL files for reproducible R&D validation. All files are generated programmatically via `scripts/generate_benchmark_stl.py` (trimesh-only, no build123d dependency).
+
+| File | Type | Radius (mm) | Height (mm) | Notes |
+|------|------|-------------|-------------|-------|
+| `benchmark_kit/ideal/ideal_cylinder.stl` | ideal | 20.0 | 40.0 | Perfect mesh, 128 sections |
+| `benchmark_kit/ideal/ideal_stepped_shaft.stl` | ideal | 15.0/10.0 | 50.0 | 2-zone stepped shaft |
+| `benchmark_kit/noise/noise_cylinder.stl` | noise | 20.0±0.3 | 40.0 | Gaussian noise σ=0.3mm |
+| `benchmark_kit/noise/noise_stepped_shaft.stl` | noise | 15.0/10.0±0.5 | 50.0 | σ=0.5mm |
+| `tests/fixtures/plain_shaft.stl` | fixture | 9.984 | 50.0 | Slightly under 10mm, sections=64 |
+| `tests/fixtures/stepped_shaft.stl` | fixture | 15.0/10.0 | 50.0 | 2-zone reference, sections=64 |
+
+### Ground Truth Parameters
+
+| Model | Zone Count | Tolerance (mm) | Min Confidence |
+|-------|------------|----------------|----------------|
+| ideal_cylinder | 1 | 0.2 | 0.95 |
+| ideal_stepped_shaft | 2 | 0.2 | 0.92 |
+| noise_cylinder | 1 | 0.5 | 0.80 |
+| noise_stepped_shaft | 2 | 0.8 | 0.70 |
+| plain_shaft_fixture | 1 | 0.5 | 0.70 |
+| stepped_shaft_fixture | 2 | 0.5 | 0.70 |
+
+---
+
+## 8. Technical Risks
 
 | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
@@ -219,7 +245,7 @@ Priority bodies for R&D validation:
 
 ---
 
-## 8. Definition of Done for Sber500 Demo
+## 9. Definition of Done for Sber500 Demo
 
 The demo is ready when:
 

@@ -45,6 +45,8 @@ Thumbs.db
 
 # Project specific
 *.stl
+!benchmark_kit/**/*.stl
+!tests/fixtures/**/*.stl
 *.step
 *.stp
 *.3mf
