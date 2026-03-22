@@ -320,104 +320,73 @@ Generate only the Python code, no markdown formatting."""
         plan: ShaftConstructionPlan,
         output_dir: Optional[str] = None
     ) -> str:
-        """Generate revolve-based build123d code for a shaft."""
-        lines = [
+        """Generate revolve-based build123d code for a shaft.
+
+        Produces a valid build123d script that:
+          1. Builds a closed profile Polyline in Plane.XZ (x = radius, z = height).
+          2. Fills it with make_face().
+          3. Revolves around Axis.Z to create the solid.
+          4. Applies local feature cuts (keyways, holes, etc.).
+          5. Exports STEP and STL.
+
+        The generated code has no LLM dependency — it is a deterministic template.
+        """
+        out_dir_str = output_dir or "output"
+
+        lines: List[str] = [
             '"""Generated parametric shaft model using build123d."""',
             "",
             "from build123d import *",
             "from build123d.exporters import export_step, export_stl",
             "import pathlib",
             "",
-            "# Parameters",
+            "# ── Parameters ──────────────────────────────────────────────",
             f"shaft_length = {plan.base_axis.length:.6f}",
         ]
-        
-        # Add zone parameters
+
         for i, zone in enumerate(plan.segments):
             lines.append(f"zone{i}_radius = {zone.mean_radius:.6f}")
-            lines.append(f"zone{i}_length = {zone.end_pos - zone.start_pos:.6f}")
-        
-        # Add feature parameters
-        for i, feature in enumerate(plan.features):
-            for key, value in feature.dimensions.items():
-                lines.append(f"feature{i}_{key} = {value:.6f}")
-        
+            lines.append(
+                f"zone{i}_length = {zone.end_pos - zone.start_pos:.6f}"
+            )
+
+        for i, feat in enumerate(plan.features):
+            for key, val in feat.dimensions.items():
+                lines.append(f"feature{i}_{key} = {val:.6f}")
+
+        # ── Profile polyline points ────────────────────────────────────
+        profile_pts = _build_revolve_polyline(plan)
+        pts_repr = ", ".join(f"({r:.6f}, {z:.6f})" for r, z in profile_pts)
+
         lines.extend([
             "",
-            "# Build the shaft",
-            "with BuildPart() as shaft:",
+            "# ── Build shaft solid ───────────────────────────────────────",
+            "with BuildPart() as shaft_part:",
+            "    with BuildSketch(Plane.XZ):",
+            "        with BuildLine():",
+            f"            Polyline({pts_repr}, close=True)",
+            "        make_face()",
+            "    revolve(axis=Axis.Z)",
         ])
-        
-        # Build revolve profile from zones
-        indent = "    "
-        lines.extend(self._generate_revolve_profile(plan, indent))
-        
-        # Add feature cuts
+
+        # ── Local feature cuts ─────────────────────────────────────────
         for i, feature in enumerate(plan.features):
-            lines.extend(self._generate_feature_cut(feature, i, indent))
-        
-        # Export
+            lines.extend(self._generate_feature_cut(feature, i, "    "))
+
         lines.extend([
             "",
-            "# Get the part",
-            "part = shaft.part",
-            "",
-            "# Export",
-            f"output_dir = pathlib.Path('{output_dir or 'output'}')",
-            "output_dir.mkdir(parents=True, exist_ok=True)",
-            "export_step(part, output_dir / 'shaft.step')",
-            "export_stl(part, output_dir / 'shaft_preview.stl')",
+            "# ── Export ──────────────────────────────────────────────────",
+            "part = shaft_part.part",
+            f"_out = pathlib.Path('{out_dir_str}')",
+            "_out.mkdir(parents=True, exist_ok=True)",
+            "export_step(part, str(_out / 'shaft.step'))",
+            "export_stl(part, str(_out / 'shaft_preview.stl'))",
             "",
             "if __name__ == '__main__':",
-            '    print(f"Generated shaft: {part.volume:.4f} mm^3")',
+            "    print(f'Generated shaft: {part.volume:.4f} mm^3')",
         ])
-        
+
         return "\n".join(lines)
-    
-    def _generate_revolve_profile(
-        self,
-        plan: ShaftConstructionPlan,
-        indent: str
-    ) -> List[str]:
-        """Generate the revolve profile from shaft segments."""
-        lines = []
-        
-        # Build profile points from zones
-        # For proper revolve, we need a polyline in the X-Y plane
-        # that will be revolved around the Y-axis (or Z-axis in build123d)
-        
-        lines.append(f"{indent}# Build revolve profile")
-        lines.append(f"{indent}with BuildSketch(Plane.XZ) as profile:")
-        lines.append(f"{indent}    # Profile points (radius, position)")
-        
-        # Collect unique (position, radius) points
-        profile_points = []
-        for zone in plan.segments:
-            # Start point
-            profile_points.append((zone.start_radius, zone.start_pos))
-            # End point
-            profile_points.append((zone.end_radius, zone.end_pos))
-        
-        # Remove duplicates and sort by position
-        seen = set()
-        unique_points = []
-        for r, z in sorted(profile_points, key=lambda x: x[1]):
-            key = (round(r, 4), round(z, 4))
-            if key not in seen:
-                seen.add(key)
-                unique_points.append((r, z))
-        
-        # Generate Polyline
-        points_str = ", ".join([f"({r:.4f}, {z:.4f})" for r, z in unique_points])
-        lines.append(f"{indent}    points = [{points_str}]")
-        lines.append(f"{indent}    Polyline(*points)")
-        lines.append(f"{indent}    Line(profile.vertices[-1], profile.vertices[0])")  # Close
-        
-        # Revolve
-        lines.append(f"{indent}# Revolve to create shaft body")
-        lines.append(f"{indent}revolve(axis=Axis.Z)")
-        
-        return lines
     
     def _generate_feature_cut(
         self,
@@ -464,6 +433,57 @@ Generate only the Python code, no markdown formatting."""
             lines.append(f"{indent}    extrude(amount={diameter*3:.4f}, mode=Mode.SUBTRACT)")
         
         return lines
+
+
+def _build_revolve_polyline(plan: "ShaftConstructionPlan") -> list:
+    """Build ordered (radius, z) points for the Polyline revolve profile.
+
+    The polyline traces the outer boundary of the shaft cross-section in the
+    XZ plane from bottom to top, then returns along the revolution axis
+    (radius = 0) to form a closed profile suitable for revolve().
+
+    Args:
+        plan: ShaftConstructionPlan with sorted segments.
+
+    Returns:
+        List of (radius, z_position) tuples in CCW order.
+    """
+    from backend.core.state import ShaftZoneType
+
+    sorted_segs = sorted(plan.segments, key=lambda s: s.start_pos)
+
+    outer: list = []
+    for seg in sorted_segs:
+        if seg.zone_type in (ShaftZoneType.CYLINDER, ShaftZoneType.STEP):
+            outer.append((seg.mean_radius, seg.start_pos))
+            outer.append((seg.mean_radius, seg.end_pos))
+        elif seg.zone_type == ShaftZoneType.CONE:
+            outer.append((seg.start_radius, seg.start_pos))
+            outer.append((seg.end_radius, seg.end_pos))
+        elif seg.zone_type in (ShaftZoneType.FILLET, ShaftZoneType.CHAMFER):
+            outer.append((seg.start_radius, seg.start_pos))
+            outer.append((seg.end_radius, seg.end_pos))
+        elif seg.zone_type == ShaftZoneType.GROOVE:
+            eps = max(0.05, (seg.end_pos - seg.start_pos) * 0.1)
+            outer.append((seg.start_radius, seg.start_pos))
+            outer.append((seg.mean_radius, seg.start_pos + eps))
+            outer.append((seg.mean_radius, seg.end_pos - eps))
+            outer.append((seg.end_radius, seg.end_pos))
+
+    if not outer:
+        return []
+
+    # Deduplicate consecutive identical points
+    deduped: list = [outer[0]]
+    for pt in outer[1:]:
+        if abs(pt[0] - deduped[-1][0]) > 1e-6 or abs(pt[1] - deduped[-1][1]) > 1e-6:
+            deduped.append(pt)
+
+    z_top = deduped[-1][1]
+    z_bot = deduped[0][1]
+    # Close through axis: top → axis top → axis bottom (→ polyline close returns to outer[0])
+    all_pts = deduped + [(0.0, z_top), (0.0, z_bot)]
+    return all_pts
 
 
 def create_coder_agent(

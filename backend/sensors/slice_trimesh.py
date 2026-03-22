@@ -135,7 +135,11 @@ class SliceAnalyzer:
                 return None
 
             # Convert to 2D
-            slice_2d, _ = slice_3d.to_planar()
+            # to_2D replaces the deprecated to_planar (removed in trimesh ≥ 4.x)
+            try:
+                slice_2d, _ = slice_3d.to_2D()
+            except (AttributeError, TypeError):
+                slice_2d, _ = slice_3d.to_planar()  # legacy fallback
             
             # Extract polygons
             polygons = []
@@ -421,7 +425,11 @@ class SliceAnalyzer:
             if slice_3d is None:
                 return None
 
-            slice_2d, _ = slice_3d.to_planar()
+            # to_2D replaces the deprecated to_planar (removed in trimesh ≥ 4.x)
+            try:
+                slice_2d, _ = slice_3d.to_2D()
+            except (AttributeError, TypeError):
+                slice_2d, _ = slice_3d.to_planar()  # legacy fallback
 
             # Extract polygons
             polygons = []
@@ -448,8 +456,20 @@ class SliceAnalyzer:
             # Compute circularity
             circularity = (4 * np.pi * area) / (perimeter ** 2) if perimeter > 0 else 0
 
-            # Estimate radius from area (assuming circular)
+            # Area-based radius estimate (backward compatible)
             radius = np.sqrt(area / np.pi)
+
+            # Boundary-based radius: mean distance from centroid to all boundary
+            # vertices. For a perfect circle this equals the true radius. For
+            # slightly non-circular sections (mesh approximation) it gives a more
+            # physically meaningful estimate than the area-based one.
+            try:
+                coords = np.array(largest_poly.exterior.coords)[:-1]  # drop duplicate
+                centroid_xy = np.array([centroid[0], centroid[1]])
+                boundary_distances = np.linalg.norm(coords - centroid_xy, axis=1)
+                boundary_radius = float(np.mean(boundary_distances))
+            except Exception:
+                boundary_radius = radius  # fallback to area-based
 
             result = {
                 "position": float(position),
@@ -457,7 +477,8 @@ class SliceAnalyzer:
                 "area": float(area),
                 "perimeter": float(perimeter),
                 "circularity": float(circularity),
-                "radius": float(radius),
+                "radius": float(radius),           # area-based (backward compat)
+                "boundary_radius": float(boundary_radius),  # mean boundary distance
                 "centroid": list(centroid),
                 "bounds": [[float(bounds[0]), float(bounds[1])], [float(bounds[2]), float(bounds[3])]]
             }

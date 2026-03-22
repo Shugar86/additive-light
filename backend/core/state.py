@@ -4,7 +4,7 @@ This module defines the typed state objects that flow through
 the multi-agent system graph.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Literal, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -98,6 +98,7 @@ class BuildStep(BaseModel):
 class ShaftZoneType(str, Enum):
     """Types of zones in a shaft construction plan."""
     CYLINDER = "cylinder"
+    CONE = "cone"           # Linearly tapered frustum section
     FILLET = "fillet"
     CHAMFER = "chamfer"
     GROOVE = "groove"
@@ -177,7 +178,7 @@ class ShaftConstructionPlan(BaseModel):
         confidence: Overall detection confidence
         measurement_log: Audit trail of measurements
     """
-    part_type: str = Field(default="shaft", const=True)
+    part_type: Literal["shaft"] = "shaft"
     base_axis: AxisSpec
     segments: List[ShaftZoneSpec] = Field(default_factory=list)
     features: List[LocalFeatureSpec] = Field(default_factory=list)

@@ -37,9 +37,10 @@ logger = logging.getLogger(__name__)
 class ZoneType(Enum):
     """Types of zones in a shaft profile."""
     CYLINDER = "cylinder"          # Constant diameter section
-    FILLET = "fillet"              # Smooth radius transition
-    CHAMFER = "chamfer"            # Angled transition
-    GROOVE = "groove"              # Recessed area
+    CONE = "cone"                  # Linearly tapered section (frustum)
+    FILLET = "fillet"              # Smooth curved radius transition
+    CHAMFER = "chamfer"            # Short angled end transition
+    GROOVE = "groove"              # Recessed area (circumferential)
     STEP = "step"                  # Sharp diameter change
     END = "end"                    # End of shaft
 
@@ -201,7 +202,9 @@ def sample_radial_profile(
             
             sample = ProfileSample(
                 position=rs["position"],
-                radius=rs["radius"],
+                # Prefer boundary-based radius when available (more accurate for
+                # bodies of revolution) and fall back to area-based radius.
+                radius=rs.get("boundary_radius", rs["radius"]),
                 area=rs["area"],
                 circularity=circularity,
                 confidence=confidence
@@ -434,20 +437,30 @@ def _classify_zone(
         zone_type = ZoneType.STEP
         confidence = 0.8
     
-    # 3. Fillet: Smooth curve (high second derivative)
+    # 3. Fillet: Smooth curve (high second derivative) with radius change
     elif mean_d2r > 0.05 and abs(end_radius - start_radius) > 0.1:
         zone_type = ZoneType.FILLET
         confidence = min(1.0, mean_d2r * 5)
     
-    # 4. Chamfer: Linear transition (constant slope)
+    # 4. Linear taper (cone or chamfer): constant slope, low curvature
     elif max_dr > slope_threshold * 0.5 and mean_d2r < 0.05:
-        zone_type = ZoneType.CHAMFER
-        # Compute chamfer angle
-        chamfer_angle = 0.0  # Task 2.2: Always declare before if
-        length = end_pos - start_pos
-        if length > 0:
-            chamfer_angle = np.degrees(np.arctan2(abs(end_radius - start_radius), length))
-        confidence = 0.7 + 0.3 * (1.0 - abs(chamfer_angle - 45) / 45)  # Higher confidence near 45°
+        radius_change = abs(end_radius - start_radius)
+        zone_length_val = end_pos - start_pos
+        chamfer_angle = 0.0
+        if zone_length_val > 0:
+            chamfer_angle = np.degrees(
+                np.arctan2(radius_change, zone_length_val)
+            )
+
+        # Distinguish: CONE = long primary taper; CHAMFER = short edge transition.
+        # Heuristic: if the zone is longer than 2 mm AND the absolute radius
+        # change exceeds 1 mm, treat it as a cone/frustum section.
+        if zone_length_val > 2.0 and radius_change > 1.0:
+            zone_type = ZoneType.CONE
+            confidence = 0.75 + 0.25 * min(1.0, zone_length_val / 20.0)
+        else:
+            zone_type = ZoneType.CHAMFER
+            confidence = 0.7 + 0.3 * (1.0 - abs(chamfer_angle - 45) / 45)
     
     # 5. Default to cylinder if mostly circular
     elif mean_circularity > 0.8:
@@ -470,8 +483,8 @@ def _classify_zone(
         "mean_circularity": float(mean_circularity)
     }
     
-    if zone_type == ZoneType.CHAMFER:
-        metadata["chamfer_angle_deg"] = chamfer_angle  # Task 2.2: Always defined
+    if zone_type in (ZoneType.CHAMFER, ZoneType.CONE):
+        metadata["chamfer_angle_deg"] = float(chamfer_angle)
     
     return ShaftZone(
         zone_type=zone_type,
@@ -641,6 +654,11 @@ def build_revolve_profile(
             # Constant radius: start and end points
             points.append((zone.start_pos, zone.mean_radius))
             points.append((zone.end_pos, zone.mean_radius))
+        
+        elif zone.zone_type == ZoneType.CONE:
+            # Linear taper: two points with start/end radii
+            points.append((zone.start_pos, zone.start_radius))
+            points.append((zone.end_pos, zone.end_radius))
         
         elif zone.zone_type in (ZoneType.FILLET, ZoneType.CHAMFER) and include_transitions:
             # Approximate as linear transition

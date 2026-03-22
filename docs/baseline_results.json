@@ -1,0 +1,294 @@
+[
+  {
+    "model_name": "ideal_cylinder",
+    "stl_path": "/opt/projects/additive-light _dev/benchmark_kit/ideal/ideal_cylinder.stl",
+    "category": "ideal",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 39.5959595959596,
+    "min_radius_mm": 19.995054258890974,
+    "max_radius_mm": 19.999988148731756,
+    "sample_count": 99,
+    "zones": [
+      {
+        "zone_type": "cylinder",
+        "start_pos": 0.0,
+        "end_pos": 39.5959595959596,
+        "mean_radius": 19.996699051039723,
+        "confidence": 0.99836354051953
+      }
+    ],
+    "radius_error_mm": 0.0033009489602768838,
+    "radius_error_pct": 0.01650474480138442,
+    "zone_count_correct": true,
+    "zones_matched": 0,
+    "zones_expected": 1,
+    "passed": true,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d"
+    ],
+    "duration_s": 0.7828079510945827
+  },
+  {
+    "model_name": "ideal_stepped_shaft",
+    "stl_path": "/opt/projects/additive-light _dev/benchmark_kit/ideal/ideal_stepped_shaft.stl",
+    "category": "ideal",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 49.494949494949495,
+    "min_radius_mm": 9.997532471725528,
+    "max_radius_mm": 14.999986171946507,
+    "sample_count": 99,
+    "zones": [
+      {
+        "zone_type": "step",
+        "start_pos": 0.0,
+        "end_pos": 20.202020202020204,
+        "mean_radius": 14.875651260570462,
+        "confidence": 0.7998683963082134
+      },
+      {
+        "zone_type": "cylinder",
+        "start_pos": 20.202020202020204,
+        "end_pos": 49.494949494949495,
+        "mean_radius": 9.998343680833415,
+        "confidence": 0.9995065413846461
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": true,
+    "zones_matched": 2,
+    "zones_expected": 2,
+    "passed": true,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d"
+    ],
+    "duration_s": 0.22980076901149005
+  },
+  {
+    "model_name": "noise_cylinder",
+    "stl_path": "/opt/projects/additive-light _dev/benchmark_kit/noise/noise_cylinder.stl",
+    "category": "noise",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 44.59171251817183,
+    "min_radius_mm": 7.655049256629522,
+    "max_radius_mm": 20.338152004442726,
+    "sample_count": 87,
+    "zones": [
+      {
+        "zone_type": "step",
+        "start_pos": -2.0736969601024278,
+        "end_pos": 1.3945473468664922,
+        "mean_radius": 14.471363953198338,
+        "confidence": 0.5521638737259852
+      },
+      {
+        "zone_type": "step",
+        "start_pos": 1.3945473468664922,
+        "end_pos": 40.04069819594875,
+        "mean_radius": 19.84106640528636,
+        "confidence": 0.7243511215853944
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": false,
+    "zones_matched": 0,
+    "zones_expected": 1,
+    "passed": false,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d",
+      "Zone count: expected 1, got 2",
+      "No cylinder zones detected for radius check"
+    ],
+    "duration_s": 0.18020907696336508
+  },
+  {
+    "model_name": "noise_stepped_shaft",
+    "stl_path": "/opt/projects/additive-light _dev/benchmark_kit/noise/noise_stepped_shaft.stl",
+    "category": "noise",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 51.722537385092835,
+    "min_radius_mm": 0.6529793937309712,
+    "max_radius_mm": 14.641197331777537,
+    "sample_count": 13,
+    "zones": [
+      {
+        "zone_type": "step",
+        "start_pos": 2.686891218026479,
+        "end_pos": 6.060100177923838,
+        "mean_radius": 13.045541029894764,
+        "confidence": 0.5868588968798255
+      },
+      {
+        "zone_type": "step",
+        "start_pos": 6.060100177923838,
+        "end_pos": 22.363943484094406,
+        "mean_radius": 8.003048724297784,
+        "confidence": 0.5760533974853507
+      },
+      {
+        "zone_type": "groove",
+        "start_pos": 22.363943484094406,
+        "end_pos": 25.174950950675537,
+        "mean_radius": 0.8925508448568688,
+        "confidence": 0.8
+      },
+      {
+        "zone_type": "cylinder",
+        "start_pos": 25.174950950675537,
+        "end_pos": 52.16062262985441,
+        "mean_radius": 0.8578226844177506,
+        "confidence": 0.3138170496418036
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": false,
+    "zones_matched": 0,
+    "zones_expected": 2,
+    "passed": false,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d",
+      "Zone count: expected 2, got 4",
+      "Only 0/2 zones matched within tolerance 0.8mm"
+    ],
+    "duration_s": 0.17980200005695224
+  },
+  {
+    "model_name": "real_button",
+    "stl_path": "/opt/projects/additive-light _dev/benchmark_kit/real_scans/Кнопка_2.stl",
+    "category": "real",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 7.2,
+    "min_radius_mm": 8.045850482999205,
+    "max_radius_mm": 13.937180489611233,
+    "sample_count": 17,
+    "zones": [
+      {
+        "zone_type": "fillet",
+        "start_pos": 0.0,
+        "end_pos": 0.8,
+        "mean_radius": 13.479957229149935,
+        "confidence": 0.8792664690663796
+      },
+      {
+        "zone_type": "step",
+        "start_pos": 0.8,
+        "end_pos": 5.0,
+        "mean_radius": 10.712762895288456,
+        "confidence": 0.5582972069787335
+      },
+      {
+        "zone_type": "fillet",
+        "start_pos": 5.4,
+        "end_pos": 6.2,
+        "mean_radius": 8.088637351998374,
+        "confidence": 0.5164613968813504
+      },
+      {
+        "zone_type": "cylinder",
+        "start_pos": 6.2,
+        "end_pos": 7.2,
+        "mean_radius": 8.190454167554963,
+        "confidence": 0.25872232142684787
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": null,
+    "zones_matched": null,
+    "zones_expected": null,
+    "passed": true,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d"
+    ],
+    "duration_s": 0.17762683902401477
+  },
+  {
+    "model_name": "plain_shaft_fixture",
+    "stl_path": "/opt/projects/additive-light _dev/tests/fixtures/plain_shaft.stl",
+    "category": "fixture",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 98.98989898989899,
+    "min_radius_mm": 9.975926102279681,
+    "max_radius_mm": 10.000000006470415,
+    "sample_count": 99,
+    "zones": [
+      {
+        "zone_type": "cylinder",
+        "start_pos": -50.0,
+        "end_pos": 48.98989898989899,
+        "mean_radius": 9.983958479384876,
+        "confidence": 0.9840240234209142
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": true,
+    "zones_matched": 0,
+    "zones_expected": 1,
+    "passed": true,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d"
+    ],
+    "duration_s": 0.12212416203692555
+  },
+  {
+    "model_name": "stepped_shaft_fixture",
+    "stl_path": "/opt/projects/additive-light _dev/tests/fixtures/stepped_shaft.stl",
+    "category": "fixture",
+    "axis_direction": null,
+    "axis_confidence": 0.0,
+    "axis_method": "",
+    "total_length_mm": 98.98989898989899,
+    "min_radius_mm": 9.975939030194958,
+    "max_radius_mm": 15.000000132049747,
+    "sample_count": 99,
+    "zones": [
+      {
+        "zone_type": "step",
+        "start_pos": -50.0,
+        "end_pos": -19.696969696969695,
+        "mean_radius": 14.815640653671094,
+        "confidence": 0.7987140687544605
+      },
+      {
+        "zone_type": "step",
+        "start_pos": -19.696969696969695,
+        "end_pos": 20.707070707070713,
+        "mean_radius": 10.045410245914482,
+        "confidence": 0.798714068754467
+      },
+      {
+        "zone_type": "chamfer",
+        "start_pos": 20.707070707070713,
+        "end_pos": 48.98989898989899,
+        "mean_radius": 12.47947082514186,
+        "confidence": 0.6988902386084325
+      }
+    ],
+    "radius_error_mm": null,
+    "radius_error_pct": null,
+    "zone_count_correct": false,
+    "zones_matched": 0,
+    "zones_expected": 2,
+    "passed": false,
+    "errors": [
+      "Axis detection: Open3D is not installed. Run: pip install open3d",
+      "Zone count: expected 2, got 3"
+    ],
+    "duration_s": 0.1277713329764083
+  }
+]
