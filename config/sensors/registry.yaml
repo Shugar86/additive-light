@@ -100,3 +100,9 @@ sensor_groups:
   
   quick_scan:
     - "Z"
+
+# -----------------------------------------------------------------------------
+# PROPOSED (experimental, not read by pipeline): optional hooks for future
+# CAPP-lite / manufacturing_intent ingest (e.g. align sensor_evidence refs to
+# sidecar YAML sketched in docs/examples/manufacturing_intent.example.yaml).
+# -----------------------------------------------------------------------------

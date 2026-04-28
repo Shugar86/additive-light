@@ -81,7 +81,26 @@ A strict geometric validation agent:
 3. Calculates **Chamfer Distance** and **Hausdorff Distance**.
 4. Returns a **Failure Density Report**: "High deviation detected at (10, 5, 20). Expected cylinder, found cube."
 
-## 3. Key Technologies
+## 3. Experimental layer (planned): manufacturing intent
+
+Upstream, the pipeline already materializes **structured geometry** from sensors: `SliceReport` slices, aggregated `Feature3D` hypotheses, optional strict shaft contracts (`ShaftZoneSpec` segments, `LocalFeatureSpec`), and zone expectations used in benchmark manifests. None of that is “CAPP” by itself—it is measurement and reconstruction.
+
+A **proposed** (not yet wired into LangGraph) layer would sit **after** that structured geometry and **alongside** the existing construction plan → coder path: it would attach **manufacturing_intent**—e.g. semantic labels for machinable features, stock/orientation hints, tolerance and operation sketches, and lightweight **process route** suggestions for human review. The goal is decision support and Q&A grounded in the same mesh and feature evidence, not a full automated process planner.
+
+```mermaid
+flowchart LR
+  SensorLayers[Sensor_and_zones]
+  Coord[Coordinator_or_zone_models]
+  MIntent[manufacturing_intent_proposed]
+  CADOut[Parametric_CAD_pipeline]
+  SensorLayers --> Coord
+  Coord -.->|"planned_experimental"| MIntent
+  Coord --> CADOut
+```
+
+For narrative and contract sketches, see [EXPERIMENTAL_CAPP_DIRECTION.md](EXPERIMENTAL_CAPP_DIRECTION.md) and [examples/manufacturing_intent.example.yaml](examples/manufacturing_intent.example.yaml).
+
+## 4. Key Technologies
 
 - **Orchestration:** `LangGraph`
 - **Geometry Kernel:** `build123d` (OCP/OpenCASCADE)

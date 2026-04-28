@@ -1,5 +1,6 @@
 # =============================================================================
 # GDI Benchmark Kit: Expected Results (Контрольные ожидаемые результаты)
+# Separate proposed manufacturing-intent sketches: docs/examples/manufacturing_intent.example.yaml
 # =============================================================================
 # Формат: для каждой модели фиксируем:
 #   - expected_zones: что Approximator ОБЯЗАН распознать

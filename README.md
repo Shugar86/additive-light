@@ -151,6 +151,12 @@ SAMPLE_POINT_COUNT=10000
 5. **Security First**: Generated code passes AST validation and runs in isolated subprocesses
 6. **YAGNI**: No speculative features - only what's needed for the current task
 
+## Experimental / next research direction
+
+**Early research (not enabled in the default pipeline):** we are exploring a thin **CAPP-oriented** slice on top of mesh reverse engineering—linking deterministic geometry zones and construction plans to **manufacturing intent**, **process-route hints**, and **engineering Q&A over STL** once features are inferred. This is **planned** and **experimental**; it does not replace STL→parametric CAD in the shipping graph.
+
+See [docs/EXPERIMENTAL_CAPP_DIRECTION.md](docs/EXPERIMENTAL_CAPP_DIRECTION.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
+
 ## Dependencies
 
 ```

@@ -1,0 +1,33 @@
+# =============================================================================
+# PROPOSED / EXPERIMENTAL — not consumed by default pipeline loaders
+# manufacturing_intent sidecar sketch (human review; optional tooling only)
+# =============================================================================
+
+schema_version: "0.proposed-experimental"
+
+part_ref:
+  stl_sha256: null  # optional content id
+  cad_session_id: null
+
+# Semantic labels keyed to external feature IDs (e.g. from coordinator / zone list)
+labeled_features:
+  - feature_id: "feat_001"
+    geometry_ref: {}  # PROPOSED: pointer into sensor or construction_plan ids
+    label: "bearing_journal"  # example only
+    confidence: 0.0
+    rationale: ""
+
+manufacturing_intent:
+  process_family: null  # e.g. turning | milling | hybrid — illustrative
+  stock_assumption: null  # bar | plate | near_net — illustrative
+  primary_datum_hypothesis: null
+  tolerance_notes: []  # list of provisional notes; not substitution for drawings
+
+route_hints_experimental:
+  # Non-authoritative sequence suggestions for human review
+  suggested_steps: []
+
+# -----------------------------------------------------------------------------
+# NOTE: Extend only in docs/design until a versioned schema is adopted.
+# TODO(planned research): align keys with pydantic stubs in backend/experimental/
+# -----------------------------------------------------------------------------
