@@ -303,7 +303,9 @@ def run_deterministic_pipeline(
     if output_dir is None:
         output_dir = str(stl_file.parent / f"{stl_file.stem}_reng_output")
 
-    out_path = Path(output_dir)
+    # Resolved absolute path so generated export_step(..., cwd=output_dir) writes here,
+    # not under nested duplicate paths like ./temp/det_step_run/... inside cwd.
+    out_path = Path(output_dir).resolve()
     result = DeterministicResult(stl_path=str(stl_file.absolute()))
     t_start = time.perf_counter()
 
@@ -497,8 +499,13 @@ def run_deterministic_pipeline(
         )
         if exec_result["success"]:
             # Use glob so the pipeline works regardless of the exact filename
-            # the generated script chose for its export.
-            step_files = list(out_path.glob("*.step")) + list(out_path.glob("*.STEP"))
+            # the generated script chose for its export (flat or nested cwd quirks).
+            step_files = (
+                list(out_path.glob("*.step"))
+                + list(out_path.glob("*.STEP"))
+                + list(out_path.rglob("shaft.step"))
+                + list(out_path.rglob("shaft.STEP"))
+            )
             stl_files = (
                 list(out_path.glob("*preview*.stl"))
                 or list(out_path.glob("*preview*.STL"))

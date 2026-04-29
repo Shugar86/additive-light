@@ -498,7 +498,9 @@ def align_mesh_to_axis(
         temp_dir.mkdir(parents=True, exist_ok=True)
         mesh_file = Path(mesh_path)
         output_path = str(temp_dir / f"axis_aligned_{mesh_file.stem}.stl")
-    
+
+    # Open3D requires normals before STL export or writes an empty/corrupt file.
+    mesh.compute_vertex_normals()
     o3d.io.write_triangle_mesh(output_path, mesh)
     logger.info(f"[align_mesh_to_axis] Aligned mesh saved to {output_path}")
     

@@ -336,8 +336,8 @@ Generate only the Python code, no markdown formatting."""
         lines: List[str] = [
             '"""Generated parametric shaft model using build123d."""',
             "",
+            "# export_step/export_stl are included in build123d's public star-import.",
             "from build123d import *",
-            "from build123d.exporters import export_step, export_stl",
             "import pathlib",
             "",
             "# ── Parameters ──────────────────────────────────────────────",
