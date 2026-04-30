@@ -1,0 +1,55 @@
+units_mm: true
+reference_step: Spiroid winglet left.step
+bounding_box_mm:
+  min:
+  - -3.3517633113433476e-13
+  - -66.26959991455027
+  - -5.917929172516289
+  max:
+  - 180.0296630859372
+  - 2.2389201603800757e-11
+  - 71.92045593261732
+overall_mm:
+  span_x: 180.02966308593753
+  breadth_y: 66.26959991457267
+  height_z: 77.83838510513361
+mounting_datum:
+  description: Корень у минимального X (крыла). Центроид ограничивающего блока задаёт
+    середины эллипсов loft.
+  root_center_xyz_mm:
+  - 90.01483154296842
+  - -33.13479995726394
+  - 33.00126338005051
+# Зафиксированный «корень» по первому сечению extract (sections_clean.json, index 0).
+# Не менять без повторного extract / согласования посадки.
+mount_geometry_locked:
+  sections_source: sections_clean.json
+  root_section_index: 0
+  plane_x_mm: 1.4999999999999978
+  centroid_yz_mm:
+  - -3.364306645202265
+  - 0.49410881887619895
+  ring_points: 96
+  note: Первое кольцо после сортировки по X; используется как locked mount для стыковки.
+reconstruction:
+  sections_clean_json: sections_clean.json
+  reference_preview_stl: reference_mesh_preview.stl
+  rebuilt_outer_stl: wing_tip_outer_rebuild.stl
+  comparison_sample_count: 12000
+  tolerance_comparison_mm: 1.0
+model:
+  skin_mm: 1.2
+  root_cap_solid_mm: 8.0
+  min_wall_mm: 0.95
+  outer_section_positions_pct_along_span:
+  - 0.02
+  - 0.22
+  - 0.45
+  - 0.68
+  - 0.96
+  toe_deg_max_abs: 8.5
+  cant_deg_max_abs: 3.9
+notes:
+- Эталон — только оболочка (shell STEP). Пересборка v3 идёт по ``sections_clean.json``
+  (triangle mesh), не по эллиптическому loft.
+- Если меняете крыло/STEP — заново запустите ``extract_spiroid_sections.py``.

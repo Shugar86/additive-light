@@ -1,0 +1,11 @@
+# Python 3.11+ (wingtip / spiroid pipeline)
+build123d==0.10.0
+numpy>=2.0
+PyYAML>=6.0
+trimesh>=4.12
+shapely>=2.0
+networkx>=3.0
+mapbox-earcut>=1.0
+triangle>=20250106
+manifold3d>=3.4
+rtree>=1.3
