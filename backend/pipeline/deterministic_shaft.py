@@ -147,14 +147,27 @@ class DeterministicResult:
 
 def _zones_to_specs(
     zones: List[Any],
+    zone_fits: Optional[List[Any]] = None,
 ) -> List[Any]:
     """Convert ShaftZone list to ShaftZoneSpec list for ShaftConstructionPlan.
 
+    Sprint 2.4: when ``zone_fits`` is supplied (the ``(zone, FitResult)``
+    tuples from :func:`backend.sensors.revolution_fitting.fit_all_zones`),
+    the optional ``arc_center_*`` / ``arc_radius`` fields are populated for
+    FILLET and CHAMFER zones from the fit parameters. The downstream
+    revolve polyline builder uses those fields to discretise the arc and
+    close the long-standing arc-gap (see Sprint 2 roadmap).
+
     Args:
-        zones: List of ShaftZone objects from shaft_profile.
+        zones: List of ``ShaftZone`` objects from ``shaft_profile``.
+        zone_fits: Optional parallel list of ``(zone, FitResult)`` tuples
+            in the same order as ``zones``. When ``None`` or when a fit is
+            non-arc (e.g. ``primitive_type != "arc"``), arc parameters are
+            left as ``None`` and the polyline builder falls back to the
+            linear behaviour.
 
     Returns:
-        List of ShaftZoneSpec Pydantic models.
+        List of ``ShaftZoneSpec`` Pydantic models.
     """
     from backend.core.state import ShaftZoneSpec, ShaftZoneType
     from backend.sensors.shaft_profile import ZoneType as SensorZoneType
@@ -170,9 +183,47 @@ def _zones_to_specs(
         SensorZoneType.END: ShaftZoneType.STEP,  # map END → STEP as closest
     }
 
+    # Build an index from zone identity to fit so we tolerate missing
+    # fits (fit_all_zones may skip degenerate zones).
+    fit_by_zone_id: Dict[int, Any] = {}
+    if zone_fits:
+        for z_obj, fit in zone_fits:
+            fit_by_zone_id[id(z_obj)] = fit
+
+    # Confidence floor for adopting an arc fit (chosen so noisy short
+    # zones do not get a spurious arc; the bench R0.5/R2/R5 fillets all
+    # come back well above this).
+    ARC_CONF_MIN = 0.5
+
     specs = []
     for z in zones:
         plan_type = _TYPE_MAP.get(z.zone_type, ShaftZoneType.CYLINDER)
+        arc_center_z: Optional[float] = None
+        arc_center_r: Optional[float] = None
+        arc_radius: Optional[float] = None
+
+        # Promote any zone whose fit is genuinely arc-shaped to FILLET so the
+        # polyline builder can discretise the curve. ``classify_and_fit_zone``
+        # already applies an Occam's-razor penalty against arc fits, so when
+        # it returns ``primitive_type == "arc"`` with strong confidence we
+        # trust it regardless of the sensor's original zone label.
+        fit = fit_by_zone_id.get(id(z))
+        if (
+            fit is not None
+            and getattr(fit, "primitive_type", None) == "arc"
+            and getattr(fit, "confidence", 0.0) >= ARC_CONF_MIN
+        ):
+            params = fit.params or {}
+            arc_center_z = params.get("center_z")
+            arc_center_r = params.get("center_r")
+            arc_radius = params.get("arc_radius")
+            # Only promote when the curvature is meaningful relative to the
+            # zone span (very flat "arcs" with radius >> span behave like
+            # straight chords and adopting them adds no precision).
+            if arc_radius is not None and arc_radius > 1e-6:
+                if plan_type not in (ShaftZoneType.FILLET, ShaftZoneType.CHAMFER):
+                    plan_type = ShaftZoneType.FILLET
+
         spec = ShaftZoneSpec(
             zone_type=plan_type,
             start_pos=float(z.start_pos),
@@ -181,9 +232,150 @@ def _zones_to_specs(
             end_radius=float(z.end_radius),
             mean_radius=float(z.mean_radius),
             confidence=float(z.confidence),
+            arc_center_z=arc_center_z,
+            arc_center_r=arc_center_r,
+            arc_radius=arc_radius,
         )
         specs.append(spec)
     return specs
+
+
+# ---------------------------------------------------------------------------
+# Spike Generator (Sprint 3)
+# ---------------------------------------------------------------------------
+
+
+def _generate_skill_requests(
+    stl_path: str,
+    *,
+    num_samples: int = 40,
+    phi_variance_threshold: float = 0.15,
+    min_band_samples: int = 2,
+    max_gap_for_coalesce: int = 1,
+) -> "tuple[List[Any], List[Any]]":
+    """Walk the part with the SliceAnalyzer and produce ``SkillRequest`` objects
+    for any z-band whose cross-section is not a body of revolution.
+
+    The detection is a simple thresholded run-length encoding of
+    ``phi_variance`` along the axis. Bands of consecutive slices with
+    ``phi_variance > phi_variance_threshold`` are coalesced into a single
+    region; each region produces one ``SkillRequest`` with a ranked
+    hypothesis list (keyway, cross-hole, flat). The thresholds are kept
+    conservative on purpose — a few false negatives on noisy real scans
+    are preferable to false positives on clean revolution bodies.
+
+    Args:
+        stl_path: STL file to inspect (typically the axis-aligned one).
+        num_samples: Number of slices to walk the part with.
+        phi_variance_threshold: Minimum ``phi_variance`` (std/mean of
+            boundary radii) to count a slice as out-of-scope. Default
+            0.15 sits comfortably above the tessellation noise of a
+            water-tight cylinder (~0.07-0.10 in the bench) and below the
+            signal of real keyway / flat / cross-hole bands (>0.17).
+            Configurable via ``config/swarm_policy.yaml`` in v2.
+        min_band_samples: Minimum number of consecutive out-of-scope slices
+            (after coalescing) required to emit a request.
+        max_gap_for_coalesce: Maximum number of in-band slices between two
+            over-threshold runs that still get merged into one region. The
+            keyway / cross-hole fixtures dip back below the threshold for
+            one or two slices at the centre of each peak; coalescing
+            recovers them as a single semantic feature.
+
+    Returns:
+        ``(skill_requests, out_of_scope_regions)`` parallel lists.
+
+    Raises:
+        Exception: Any failure inside the SliceAnalyzer is propagated so
+            the caller can log it as non-fatal.
+    """
+    from backend.core.state import OutOfScopeRegion, SkillRequest
+    from backend.sensors.slice_trimesh import SliceAnalyzer
+
+    analyzer = SliceAnalyzer(stl_path)
+    samples = analyzer.phi_variance_profile(axis="Z", num_samples=num_samples)
+    if not samples:
+        return [], []
+
+    # Step 1: mark each slice as "hot" or "cold".
+    hot_flags = [
+        (s.get("phi_variance") or 0.0) > phi_variance_threshold for s in samples
+    ]
+    # Step 2: coalesce runs separated by a short cold gap.
+    coalesced: List[List[int]] = []  # each entry: list of slice indices
+    i = 0
+    n = len(samples)
+    while i < n:
+        if not hot_flags[i]:
+            i += 1
+            continue
+        run = [i]
+        j = i + 1
+        while j < n:
+            if hot_flags[j]:
+                run.append(j)
+                j += 1
+                continue
+            # Look ahead: does a hot slice resume within max_gap_for_coalesce?
+            gap = 1
+            while j + gap < n and not hot_flags[j + gap] and gap <= max_gap_for_coalesce:
+                gap += 1
+            if (
+                gap <= max_gap_for_coalesce
+                and j + gap < n
+                and hot_flags[j + gap]
+            ):
+                run.extend(range(j, j + gap))  # bridge the cold gap
+                j += gap
+            else:
+                break
+        coalesced.append(run)
+        i = j
+
+    out_of_scope_regions: List[Any] = []
+    skill_requests: List[Any] = []
+    for run in coalesced:
+        if len(run) < min_band_samples:
+            continue
+        band = [samples[k] for k in run]
+        z_start = float(band[0]["position"])
+        z_end = float(band[-1]["position"])
+        phi_values = [float(b["phi_variance"]) for b in band]
+        radii = [
+            float(b["boundary_radius"])
+            for b in band
+            if b.get("boundary_radius") is not None
+        ]
+        mean_phi = float(np.mean(phi_values))
+        max_phi = float(np.max(phi_values))
+        mean_r = float(np.mean(radii)) if radii else 0.0
+        region = OutOfScopeRegion(
+            z_start=z_start,
+            z_end=z_end,
+            max_phi_variance=max_phi,
+            mean_phi_variance=mean_phi,
+            sample_count=len(band),
+            mean_radius_mm=mean_r,
+        )
+        # Hypothesis ranking is a simple shape heuristic: very high phi_variance
+        # without a big radius drop -> flat or keyway; phi_variance combined
+        # with a sharp dip in boundary_radius -> transverse_hole. Refining
+        # this is a v2 swarm job; v1 ships the ranked candidates and lets
+        # the next stage decide.
+        hypothesis = ["transverse_hole", "keyway", "flat"]
+        if max_phi > 0.20:
+            hypothesis = ["keyway", "flat", "transverse_hole"]
+        skill_requests.append(
+            SkillRequest(
+                trigger="non_revolution_region_detected",
+                region=region,
+                hypothesis=hypothesis,
+                needs_tool=f"feature_detector_for_{hypothesis[0]}",
+                confidence=min(1.0, max_phi * 5.0),
+            )
+        )
+        out_of_scope_regions.append(region)
+
+    return skill_requests, out_of_scope_regions
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +608,30 @@ def run_deterministic_pipeline(
         result.errors.append(f"Primitive fitting failed (non-fatal): {exc}")
         zone_fits = []
 
+    # ── 5b. Spike Generator (Sprint 3) ──────────────────────────────────────
+    # Walk the part with the SliceAnalyzer and flag bands of high phi_variance
+    # — these are regions whose cross-section deviates from a circle and are
+    # therefore out of scope for the deterministic revolution pipeline. The
+    # detector itself is local; the swarm-side bootstrapper that resolves
+    # the resulting SkillRequest objects lives in v2.
+    skill_requests: List[Any] = []
+    out_of_scope_regions: List[Any] = []
+    try:
+        skill_requests, out_of_scope_regions = _generate_skill_requests(
+            working_path,
+            num_samples=max(40, num_profile_samples // 2),
+        )
+        if skill_requests:
+            logger.info(
+                "[deterministic_pipeline] Spike Generator: %d skill_request(s), %d region(s)",
+                len(skill_requests),
+                len(out_of_scope_regions),
+            )
+    except Exception as exc:
+        # Detector failures must never block the deterministic path.
+        result.errors.append(f"Spike Generator failed (non-fatal): {exc}")
+        logger.warning("[deterministic_pipeline] Spike Generator: %s", exc)
+
     # ── 6. Build ShaftConstructionPlan ──────────────────────────────────────
     try:
         from backend.core.state import AxisSpec, ShaftConstructionPlan
@@ -439,7 +655,7 @@ def run_deterministic_pipeline(
             length=float(profile.total_length),
         )
 
-        zone_specs = _zones_to_specs(zones)
+        zone_specs = _zones_to_specs(zones, zone_fits=zone_fits)
         if not zone_specs:
             result.errors.append("No zone specs could be built from zones")
             result.duration_s = time.perf_counter() - t_start
@@ -452,6 +668,8 @@ def run_deterministic_pipeline(
         plan = ShaftConstructionPlan(
             base_axis=axis_spec,
             segments=zone_specs,
+            out_of_scope_regions=out_of_scope_regions,
+            skill_requests=skill_requests,
             confidence=overall_confidence,
         )
         result.construction_plan = plan
@@ -563,6 +781,27 @@ def run_deterministic_pipeline(
             }
             for z, f in zone_fits
         ]
+
+    # Sprint 3.2: surface the Spike Generator's payload at the top of the report.
+    result.report["out_of_scope_regions"] = [
+        r.model_dump() for r in (out_of_scope_regions or [])
+    ]
+    result.report["skill_requests_generated"] = [
+        sr.model_dump() for sr in (skill_requests or [])
+    ]
+
+    # Sprint 3.3: CAPP-lite manufacturing_intent placeholder.
+    # The schema lives in docs/examples/manufacturing_intent.example.yaml
+    # and is not activated until v3. We expose an empty slot in v1 so
+    # downstream tooling can already key off the field.
+    result.report["manufacturing_intent"] = {
+        "schema_version": "0.proposed-experimental",
+        "activated": False,
+        "ref": "docs/examples/manufacturing_intent.example.yaml",
+        "labeled_features": [],
+        "manufacturing_intent": {},
+        "route_hints_experimental": {"suggested_steps": []},
+    }
 
     # ── 9b. Reconstruction quality metrics ──────────────────────────────────
     # Compare the input mesh profile against the reconstructed preview STL.

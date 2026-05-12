@@ -1,8 +1,8 @@
 # Bodies of Revolution — Implementation Plan
 
-**Version:** 1.0
-**Date:** 2026-03-22
-**Status:** Active R&D
+**Version:** 2.0
+**Date:** 2026-05-12 (updated post-Sprint 0–4)
+**Status:** Sprint 0–4 complete; see [docs/ROADMAP.md](ROADMAP.md) for v2 plan
 
 ---
 
@@ -29,6 +29,17 @@ The target accuracy requirement:
 - Profile RMSE < 2.0mm on noisy/real STLs
 - IoU proxy > 0.95 on ideal models
 
+**Sprint 0–4 actuals** (see [docs/baseline_results.json](baseline_results.json)):
+
+| Model | RMSE (mm) | IoU | Conf |
+|---|---:|---:|---:|
+| `ideal_short_disc_shaft` | **0.003** | 1.000 | 0.998 |
+| `ideal_cylinder` | 0.356 | 0.986 | 0.677 |
+| `ideal_conical_shaft` | 0.445 | 0.975 | 0.636 |
+| `ideal_hourglass_shaft` | 0.460 | 0.987 | 0.600 |
+| `ideal_fillet_shaft` | 0.979 | 0.954 | 0.397 |
+| `Кнопка_2.stl` (real scan) | **0.042** | 0.997 | 0.949 |
+
 ---
 
 ## 3. Zone Type Taxonomy
@@ -44,32 +55,43 @@ The target accuracy requirement:
 
 ---
 
-## 4. Module Map
+## 4. Module Map (post-Sprint 4)
 
 ```
 backend/
 ├── sensors/
-│   ├── align_open3d.py          [STABLE]  PCA/ICP alignment
+│   ├── align_open3d.py          [UPDATED] PCA + RANSAC refinement (Sprint 2)
+│   │                                       ✓ ransac_plane_axes() rescued from P8-P9
+│   │                                       ✓ adaptive activation for PCA-degenerate parts
 │   ├── shaft_axis.py            [STABLE]  Rotation axis detection
-│   ├── shaft_profile.py         [UPDATED] r(z) profiling + zone segmentation
-│   │                                       ✓ CONE zone type added
-│   │                                       ✓ Boundary-based radius estimation
-│   ├── slice_trimesh.py         [UPDATED] Low-level slicing
-│   │                                       ✓ boundary_radius added
-│   ├── shaft_features.py        [STABLE]  Keyways, flats, holes (secondary)
-│   └── revolution_fitting.py    [NEW]     Per-zone primitive fitting
-│                                           ✓ fit_cylinder, fit_cone, fit_arc
-│                                           ✓ classify_and_fit_zone
+│   ├── shaft_profile.py         [STABLE]  r(z) profiling + zone segmentation
+│   ├── slice_trimesh.py         [UPDATED] Low-level slicing (Sprint 0, 3)
+│   │                                       ✓ public sample_at_position()
+│   │                                       ✓ phi_variance per slice
+│   │                                       ✓ phi_variance_profile() batch method
+│   └── revolution_fitting.py    [STABLE]  fit_cylinder, fit_cone, fit_arc, fit_all_zones
 │
 ├── pipeline/
-│   ├── __init__.py              [NEW]
-│   ├── deterministic_shaft.py   [NEW]     STL → STEP without LLM
-│   └── profile_metrics.py       [NEW]     r(z) comparison metrics
+│   ├── deterministic_shaft.py   [UPDATED] STL → STEP (Sprint 0–3)
+│   │                                       ✓ _zones_to_specs passes FitResult arc params
+│   │                                       ✓ Spike Generator (_generate_skill_requests)
+│   │                                       ✓ skill_requests + manufacturing_intent in report
+│   └── profile_metrics.py       [UPDATED] Sprint 0 API fix
 │
-└── agents/
-    └── coder_agent.py           [UPDATED] Fixed revolve code generator
-                                            ✓ Polyline-based profile
-                                            ✓ CONE zone support
+├── agents/
+│   └── coder_agent.py           [UPDATED] Sprint 2.4
+│                                           ✓ _arc_polyline_points() — arc discretisation
+│                                           ✓ _build_revolve_polyline() — adaptive samples
+│
+├── benchmark/                   [NEW]     Sprint 4 one-command demo runner
+│   └── __main__.py                         python -m backend.benchmark
+│
+└── core/
+    └── state.py                 [UPDATED] Sprint 2.4 + 3.2
+                                            ✓ ShaftZoneSpec: arc_center_z, arc_center_r, arc_radius
+                                            ✓ OutOfScopeRegion dataclass
+                                            ✓ SkillRequest dataclass
+                                            ✓ ShaftConstructionPlan: skill_requests, out_of_scope_regions
 ```
 
 ---
@@ -202,35 +224,29 @@ Priority for testing and demo:
 
 ## 7. Acceptance Criteria for Sber500 Demo
 
-### Minimum Viable Demo
+### Minimum Viable Demo (achieved Sprint 4)
 
-1. **CLI works end-to-end:**
-   ```
-   python -m backend.pipeline.deterministic_shaft \
-       benchmark_kit/ideal/ideal_stepped_shaft.stl \
-       -o output/demo/
-   ```
-   Completes in < 30 seconds.
+```bash
+# One-command, ~30 seconds, 8 parts:
+python -m backend.benchmark
+# → temp/sber500/<timestamp>/{report.json, summary.md, previews/*.png}
+```
 
-2. **Output artifacts present:**
-   - `output/demo/shaft.step` — valid STEP file
-   - `output/demo/ideal_stepped_shaft_report.json` — quality report
-   - `output/demo/ideal_stepped_shaft_parametric.py` — build123d source
+Achieved criteria:
 
-3. **Report metrics:**
-   - Zone count: 2 (both cylinder zones detected)
-   - Radius 1: 15.0mm ± 0.5mm
-   - Radius 2: 10.0mm ± 0.5mm
-   - Profile RMSE < 0.5mm
+1. **CLI works end-to-end** — `python -m backend.benchmark` completes 8 STL in ≈33s.
+2. **Output artefacts present** — STEP + parametric script + report.json per part.
+3. **Report metrics** (actual Sprint 4 numbers):
+   - `ideal_short_disc_shaft`: RMSE **0.003 mm**, conf **0.998** ← sub-tessellation.
+   - `Кнопка_2.stl` (real scan): RMSE **0.042 mm**, conf **0.949** ← sub-tessellation on real photogrammetry.
+   - `ideal_conical_shaft`: RMSE **0.445 mm** after Sprint 2.4 arc fix (was 3.365 mm, 7.7× improvement).
+4. **STEP file** — opens in FreeCAD / SolidWorks / Fusion / Inventor.
+5. **30/30 tests green** — `pytest tests/test_revolution_baseline.py tests/test_math_enhancements.py tests/test_out_of_scope_detector.py`.
+6. **Spike Generator** — `shaft_with_keyway.stl` produces 4 `SkillRequest` payloads; `plain_shaft.stl` produces 0.
 
-4. **STEP file:** opens in FreeCAD/CAD viewer and looks like the input STL.
+### r(z) overlay previews
 
-### Stretch Goals
-
-- Same pipeline succeeds on `noise_cylinder.stl` and `Кнопка_2.stl`
-- Visual profile comparison plot (matplotlib)
-- HTML report with embedded charts
-- Benchmark table showing accuracy across 5+ models
+`backend/benchmark/__main__.py` generates `previews/<stem>_overlay.png` for every part (source r(z) vs reconstructed r(z), matplotlib). These power the visual diff in the deck.
 
 ---
 
@@ -252,10 +268,22 @@ Priority for testing and demo:
 
 ---
 
-## 9. Future Work (Post-Sber500)
+## 9. Future Work
 
-1. **Spline fitting for freeform zones** — B-spline fit for complex profiles
-2. **Non-revolution bodies** — prismatic parts, extrusions, swept solids
-3. **Local feature integration** — keyways and cross-holes in deterministic_shaft.py
-4. **Visual output** — matplotlib profile comparison in pipeline
-5. **Confidence thresholding** — auto-escalate to LLM coordinator when confidence < 0.5
+### v2 (swarm activation)
+
+1. **Spike Generator → bootstrapper** — wire `SkillRequest.needs_tool` into `controlled_bootstrapper.py`; first skills: `feature_detector_for_keyway`, `feature_detector_for_transverse_hole`.
+2. **Local feature CAD integration** — keyways and cross-holes were always scaffolded in `coder_agent.py` (`_generate_feature_cut`); v2 makes them real.
+3. **Spline fitting for barrel/freeform zones** — `ideal_barrel_shaft.stl` RMSE 11.7 mm is the current canary.
+4. **LangGraph coordinator activation** — once bootstrapper is stable.
+
+### v3 (CAPP-lite)
+
+5. **Populate `manufacturing_intent`** — process family, stock assumption, primary datum, tolerance notes.
+6. **Engineering Q&A** over the same mesh + zone evidence.
+
+### Infrastructure
+
+7. **Arbitrary 3D axis** — RANSAC currently refines PCA but still picks from {X,Y,Z}; post-v2 can extend to arbitrary in-plane axis using symmetry fit.
+8. **Scan noise robustness** — calibrate `phi_variance` threshold and zone segmentation hyperparameters on a larger real-scan dataset.
+9. **Open-source publication** — post-Sber500 demo; defensive publication on zone-fitting + Spike Generator method.

@@ -283,3 +283,120 @@ real_button:
       cross_section: Circle  # Скорее всего кнопка — тело вращения
   confidence_floor: 0.50
   notes: "Кнопка — вероятно тело вращения. Хороший тест для Sensor."
+
+# --- SPRINT 1.3 EVIL-SHAFTS (scope v1 coverage) ---------------------------
+# Сгенерированы через scripts/generate_benchmark_stl.py (revolve_profile).
+# Параметры зон совпадают с теми, что заложены в генератор.
+
+ideal_hourglass_shaft:
+  file: ideal/ideal_hourglass_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Variable_Profile  # песочные часы — гладкий вогнутый профиль
+      cross_section: Circle
+      params:
+        r_end: 18.0
+        r_waist: 8.0
+        height: 60.0
+        tolerance_mm: 0.5
+  min_iou: 0.92
+  confidence_floor: 0.55
+  notes: "Sprint 1.3 — диаболо. L≈D, есть риск PCA edge case в alignment. Sprint 2 RANSAC должен улучшить."
+
+ideal_chamfer_shaft:
+  file: ideal/ideal_chamfer_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      cross_section: Circle
+      params: { radius: 20.0, tolerance_mm: 0.2, length: 15.0 }
+    - zone_id: 2
+      geometry: Chamfer
+      params: { angle_deg: 30.0, tolerance_deg: 2.0 }
+    - zone_id: 3
+      geometry: Constant_Profile
+      params: { radius: 15.0, tolerance_mm: 0.2, length: 12.0 }
+    - zone_id: 4
+      geometry: Chamfer
+      params: { angle_deg: 45.0, tolerance_deg: 2.0 }
+    - zone_id: 5
+      geometry: Constant_Profile
+      params: { radius: 10.0, tolerance_mm: 0.2, length: 10.0 }
+    - zone_id: 6
+      geometry: Chamfer
+      params: { angle_deg: 60.0, tolerance_deg: 2.0 }
+    - zone_id: 7
+      geometry: Constant_Profile
+      params: { radius: 6.0, tolerance_mm: 0.2, length: 8.0 }
+  min_iou: 0.95
+  confidence_floor: 0.50
+  notes: "Sprint 2.4 golden test. До arc-gap closing ожидаем RMSE >1mm. После — <0.2mm."
+
+ideal_fillet_shaft:
+  file: ideal/ideal_fillet_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      params: { radius: 15.0, tolerance_mm: 0.2 }
+    - zone_id: 2
+      geometry: Fillet
+      params: { arc_radius: 5.0, tolerance_mm: 0.3 }
+    - zone_id: 3
+      geometry: Constant_Profile
+      params: { radius: 10.0, tolerance_mm: 0.2 }
+    - zone_id: 4
+      geometry: Fillet
+      params: { arc_radius: 2.0, tolerance_mm: 0.2 }
+    - zone_id: 5
+      geometry: Constant_Profile
+      params: { radius: 8.0, tolerance_mm: 0.2 }
+    - zone_id: 6
+      geometry: Fillet
+      params: { arc_radius: 0.5, tolerance_mm: 0.1 }
+    - zone_id: 7
+      geometry: Constant_Profile
+      params: { radius: 6.0, tolerance_mm: 0.2 }
+  min_iou: 0.95
+  confidence_floor: 0.50
+  notes: "Sprint 2.4 golden test (fillets). Каждая галтель — точная дуга, sampled 16 точками."
+
+ideal_conical_shaft:
+  file: ideal/ideal_conical_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Cone
+      params: { r1: 8.0, r2: 20.0, height: 15.0, tolerance_mm: 0.3 }
+    - zone_id: 2
+      geometry: Constant_Profile
+      params: { radius: 20.0, tolerance_mm: 0.2, length: 10.0 }
+    - zone_id: 3
+      geometry: Cone
+      params: { r1: 20.0, r2: 8.0, height: 15.0, tolerance_mm: 0.3 }
+  min_iou: 0.95
+  confidence_floor: 0.55
+  notes: "Sprint 2 — проверка fit_cone на двух конусах с противоположными наклонами."
+
+ideal_barrel_shaft:
+  file: ideal/ideal_barrel_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Spline_Variable_Profile
+      params:
+        r_end: 10.0
+        r_mid: 20.0
+        height: 60.0
+        generatrix: "quadratic"
+        tolerance_mm: 0.5
+  min_iou: 0.85
+  confidence_floor: 0.30
+  notes: "Сейчас fit_spline = stub → RMSE ожидаем большой (≈15mm в baseline). Цель — v2 (после Sprint 4)."
+
+ideal_short_disc_shaft:
+  file: ideal/ideal_short_disc_shaft.stl
+  expected_zones:
+    - zone_id: 1
+      geometry: Constant_Profile
+      params: { radius: 25.0, tolerance_mm: 0.1, height: 10.0 }
+  min_iou: 0.99
+  confidence_floor: 0.95
+  notes: "L≈D/2.5 — PCA edge case. Sprint 1.3 baseline conf=0.998 (после Sprint 0). Sanity check для axis robustness."

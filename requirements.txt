@@ -1,6 +1,8 @@
 open3d==0.18.0
 trimesh
 shapely
+numpy
+scipy>=1.11
 networkx
 pydantic
 pydantic-settings

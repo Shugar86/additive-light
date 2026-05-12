@@ -6,7 +6,8 @@ into executable Python code using the build123d library (OCP-based parametric CA
 
 import logging
 import json
-from typing import Dict, Any, List, Optional
+import math
+from typing import Any, Dict, List, Optional, Tuple
 
 from backend.core.state import CADState, BuildStep, Feature3D, ShaftConstructionPlan
 from backend.core.config import settings
@@ -435,15 +436,66 @@ Generate only the Python code, no markdown formatting."""
         return lines
 
 
-def _build_revolve_polyline(plan: "ShaftConstructionPlan") -> list:
+def _arc_polyline_points(
+    center_r: float,
+    center_z: float,
+    arc_radius: float,
+    start_pos: float,
+    end_pos: float,
+    start_radius: float,
+    end_radius: float,
+    n: int = 16,
+) -> List[Tuple[float, float]]:
+    """Sample ``n`` points on the fitted arc, returned as (radius, z) pairs.
+
+    The arc is parameterised by its centre ``(center_r, center_z)`` in
+    profile space and its radius. The two end-points ``(start_radius,
+    start_pos)`` and ``(end_radius, end_pos)`` come from the zone spec and
+    pin down the angular extent. This is the Sprint 2.4 deterministic
+    replacement for the previous linear FILLET / CHAMFER polyline.
+    """
+    n = max(2, int(n))
+    a0 = math.atan2(start_pos - center_z, start_radius - center_r)
+    a1 = math.atan2(end_pos - center_z, end_radius - center_r)
+    # Pick the shorter angular path around the circle.
+    delta = a1 - a0
+    if delta > math.pi:
+        delta -= 2 * math.pi
+    elif delta < -math.pi:
+        delta += 2 * math.pi
+    pts: List[Tuple[float, float]] = []
+    for i in range(n):
+        t = i / (n - 1)
+        ang = a0 + delta * t
+        r = center_r + arc_radius * math.cos(ang)
+        z = center_z + arc_radius * math.sin(ang)
+        pts.append((float(r), float(z)))
+    return pts
+
+
+def _build_revolve_polyline(
+    plan: "ShaftConstructionPlan",
+    *,
+    arc_samples: int = 16,
+) -> list:
     """Build ordered (radius, z) points for the Polyline revolve profile.
 
     The polyline traces the outer boundary of the shaft cross-section in the
     XZ plane from bottom to top, then returns along the revolution axis
     (radius = 0) to form a closed profile suitable for revolve().
 
+    Sprint 2.4: FILLET / CHAMFER zones that carry fitted-arc parameters
+    (``arc_center_z``, ``arc_center_r``, ``arc_radius``) are discretised
+    along the actual arc instead of approximated with a straight chord.
+    The chord behaviour stays as a fallback when the arc parameters are
+    absent (legacy zones, non-arc fits) so existing reports keep producing
+    the same STEP geometry they did before.
+
     Args:
         plan: ShaftConstructionPlan with sorted segments.
+        arc_samples: Number of polyline samples per fitted arc (default 16).
+            Increase for tighter tolerance on small radii; decrease for
+            faster build123d execution.
 
     Returns:
         List of (radius, z_position) tuples in CCW order.
@@ -461,8 +513,42 @@ def _build_revolve_polyline(plan: "ShaftConstructionPlan") -> list:
             outer.append((seg.start_radius, seg.start_pos))
             outer.append((seg.end_radius, seg.end_pos))
         elif seg.zone_type in (ShaftZoneType.FILLET, ShaftZoneType.CHAMFER):
-            outer.append((seg.start_radius, seg.start_pos))
-            outer.append((seg.end_radius, seg.end_pos))
+            arc_radius = getattr(seg, "arc_radius", None)
+            center_z = getattr(seg, "arc_center_z", None)
+            center_r = getattr(seg, "arc_center_r", None)
+            if (
+                arc_radius is not None
+                and center_z is not None
+                and center_r is not None
+                and arc_radius > 1e-6
+            ):
+                # Adaptive sample count: aim for a polyline step around
+                # 0.5 mm along the arc length. ``arc_samples`` becomes a
+                # floor — short fillets still get 16 samples, long barrel
+                # arcs get tens of points so build123d ``make_face`` can
+                # close the wire cleanly.
+                arc_len = arc_radius * (
+                    abs(seg.end_pos - seg.start_pos) / max(arc_radius, 1e-6)
+                )
+                n_adaptive = max(arc_samples, int(arc_len / 0.5) + 1)
+                # Cap to keep STEP generation fast.
+                n_adaptive = min(n_adaptive, 256)
+                outer.extend(
+                    _arc_polyline_points(
+                        center_r=float(center_r),
+                        center_z=float(center_z),
+                        arc_radius=float(arc_radius),
+                        start_pos=float(seg.start_pos),
+                        end_pos=float(seg.end_pos),
+                        start_radius=float(seg.start_radius),
+                        end_radius=float(seg.end_radius),
+                        n=n_adaptive,
+                    )
+                )
+            else:
+                # Legacy / no-fit fallback: linear chord between endpoints.
+                outer.append((seg.start_radius, seg.start_pos))
+                outer.append((seg.end_radius, seg.end_pos))
         elif seg.zone_type == ShaftZoneType.GROOVE:
             eps = max(0.05, (seg.end_pos - seg.start_pos) * 0.1)
             outer.append((seg.start_radius, seg.start_pos))

@@ -407,6 +407,78 @@ class SliceAnalyzer:
         logger.info(f"Collected {len(samples)} profile samples along {axis}-axis")
         return samples
 
+    def phi_variance_profile(
+        self,
+        axis: str = "Z",
+        num_samples: int = 40,
+    ) -> List[Dict[str, Any]]:
+        """Sample ``phi_variance`` evenly along ``axis``.
+
+        Sprint 3.1 helper used by the Spike Generator: walks the part with
+        ``num_samples`` slices, returns a list of dicts with ``position``,
+        ``phi_variance``, ``boundary_radius`` and ``circularity``. Slices
+        that could not be extracted produce no entry (caller can fill gaps
+        with NaN if needed).
+
+        Args:
+            axis: One of "X", "Y", "Z" (case-insensitive). Default "Z".
+            num_samples: Number of evenly spaced positions to sample.
+
+        Returns:
+            List of slice descriptors, one per successfully sampled slice.
+
+        Raises:
+            ValueError: If ``axis`` is not one of X/Y/Z.
+        """
+        samples = self.sample_profile_along_axis(
+            axis=axis, num_samples=num_samples, sample_type="circle"
+        )
+        return [
+            {
+                "position": s["position"],
+                "phi_variance": s.get("phi_variance", 0.0),
+                "boundary_radius": s.get("boundary_radius"),
+                "circularity": s.get("circularity"),
+            }
+            for s in samples
+        ]
+
+    def sample_at_position(
+        self,
+        position: float,
+        axis: str = "Z",
+        sample_type: str = "circle",
+    ) -> Optional[Dict[str, Any]]:
+        """Sample a single cross-section at the given coordinate along an axis.
+
+        Thin public wrapper around ``_sample_at_position`` so callers do not
+        have to know the internal axis-index encoding. Used by
+        ``backend.pipeline.profile_metrics._sample_radius_along_z`` and any
+        external tooling that needs a single targeted measurement (think of it
+        as a single dial-gauge reading on the part).
+
+        Args:
+            position: Coordinate along the chosen axis (mm).
+            axis: One of "X", "Y", "Z" (case-insensitive). Default "Z".
+            sample_type: Pass-through hint for downstream extractors. Default
+                "circle" — keeps backward compatibility with the legacy
+                profile extractor.
+
+        Returns:
+            Cross-section descriptor dict (see ``_sample_at_position``) with
+            keys ``position``, ``axis``, ``area``, ``perimeter``,
+            ``circularity``, ``radius``, ``boundary_radius``, ``centroid``,
+            ``bounds``; or ``None`` if the slice could not be extracted.
+
+        Raises:
+            ValueError: If ``axis`` is not one of X/Y/Z.
+        """
+        axis_upper = axis.upper()
+        if axis_upper not in ("X", "Y", "Z"):
+            raise ValueError(f"Axis must be 'X', 'Y', or 'Z', got: {axis}")
+        axis_idx = {"X": 0, "Y": 1, "Z": 2}[axis_upper]
+        return self._sample_at_position(axis_idx, float(position), axis_upper, sample_type)
+
     def _sample_at_position(
         self,
         axis_idx: int,
@@ -463,13 +535,24 @@ class SliceAnalyzer:
             # vertices. For a perfect circle this equals the true radius. For
             # slightly non-circular sections (mesh approximation) it gives a more
             # physically meaningful estimate than the area-based one.
+            #
+            # Sprint 3.1: ``phi_variance`` is the coefficient of variation of
+            # the boundary radii (std / mean). It is ~0 for a perfect circle
+            # and grows when the cross-section is broken by a keyway, flat,
+            # cross-hole, etc. The Spike Generator in
+            # ``deterministic_shaft.py`` uses it to flag out-of-scope regions.
             try:
                 coords = np.array(largest_poly.exterior.coords)[:-1]  # drop duplicate
                 centroid_xy = np.array([centroid[0], centroid[1]])
                 boundary_distances = np.linalg.norm(coords - centroid_xy, axis=1)
                 boundary_radius = float(np.mean(boundary_distances))
+                if boundary_radius > 1e-9:
+                    phi_variance = float(np.std(boundary_distances) / boundary_radius)
+                else:
+                    phi_variance = 0.0
             except Exception:
                 boundary_radius = radius  # fallback to area-based
+                phi_variance = 0.0
 
             result = {
                 "position": float(position),
@@ -479,6 +562,7 @@ class SliceAnalyzer:
                 "circularity": float(circularity),
                 "radius": float(radius),           # area-based (backward compat)
                 "boundary_radius": float(boundary_radius),  # mean boundary distance
+                "phi_variance": float(phi_variance),  # Sprint 3.1: out-of-scope detector
                 "centroid": list(centroid),
                 "bounds": [[float(bounds[0]), float(bounds[1])], [float(bounds[2]), float(bounds[3])]]
             }

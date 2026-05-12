@@ -107,9 +107,17 @@ class ShaftZoneType(str, Enum):
 
 class ShaftZoneSpec(BaseModel):
     """Specification for a shaft zone (segment).
-    
+
     This is the core building block for revolve-based shaft construction.
     Each zone represents a section with constant or varying radius.
+
+    Sprint 2.4 adds three optional fields (``arc_center_z``, ``arc_center_r``,
+    ``arc_radius``) so the construction plan can carry the fitted arc
+    geometry for FILLET and CHAMFER zones. The revolve polyline builder
+    uses them to discretise the arc instead of falling back to a straight
+    segment between ``start_radius`` and ``end_radius``. Keeping the fields
+    optional preserves wire-format backward compatibility with reports
+    written before Sprint 2.4.
     """
     zone_type: ShaftZoneType
     start_pos: float = Field(..., description="Start position along shaft axis")
@@ -118,10 +126,21 @@ class ShaftZoneSpec(BaseModel):
     end_radius: float = Field(..., ge=0, description="Radius at end position")
     mean_radius: float = Field(..., ge=0, description="Average radius in zone")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
-    
+
     # Additional metadata for specific zone types
     chamfer_angle: Optional[float] = Field(None, description="Chamfer angle in degrees (for chamfer zones)")
     fillet_radius: Optional[float] = Field(None, ge=0, description="Fillet radius (for fillet zones)")
+
+    # Sprint 2.4: fitted-arc parameters for FILLET / CHAMFER zones.
+    arc_center_z: Optional[float] = Field(
+        None, description="Z coordinate of fitted arc centre (Sprint 2.4)"
+    )
+    arc_center_r: Optional[float] = Field(
+        None, description="Radial coordinate of fitted arc centre (Sprint 2.4)"
+    )
+    arc_radius: Optional[float] = Field(
+        None, ge=0.0, description="Fitted arc radius (Sprint 2.4)"
+    )
 
 
 class LocalFeatureType(str, Enum):
@@ -162,6 +181,45 @@ class MeasurementLogEntry(BaseModel):
     details: Dict[str, Any] = Field(default_factory=dict)
 
 
+class OutOfScopeRegion(BaseModel):
+    """A z-band whose cross-section is not a body of revolution.
+
+    Sprint 3 introduces the Spike Generator: instead of silently smearing
+    over a keyway / cross-hole / flat with an average radius, the pipeline
+    detects regions of high ``phi_variance`` (deviation of boundary points
+    from a perfect circle) and records them here. The data is consumed by
+    :class:`SkillRequest` to formulate an explicit ask for the v2 swarm.
+    """
+
+    z_start: float = Field(..., description="Lower bound of the region along the axis")
+    z_end: float = Field(..., description="Upper bound of the region along the axis")
+    max_phi_variance: float = Field(..., ge=0.0, description="Peak phi_variance score observed in the band")
+    mean_phi_variance: float = Field(..., ge=0.0, description="Mean phi_variance score across the band")
+    sample_count: int = Field(..., ge=0, description="Number of slices that contributed to the region")
+    mean_radius_mm: float = Field(..., ge=0.0, description="Mean boundary radius across the band (mm)")
+
+
+class SkillRequest(BaseModel):
+    """An explicit request emitted by the Spike Generator for a missing tool.
+
+    The blind engineer metaphor: when the deterministic toolkit can not
+    handle a region of the part, it tells the swarm what kind of tool it
+    needs ("a transverse-hole detector for z=[12.5, 14.0]"), rather than
+    silently producing a low-confidence reconstruction. Activation of the
+    bootstrapper that fulfils the request lives in roadmap v2 — the v1
+    payload below is what the report carries today.
+    """
+
+    trigger: str = Field(..., description="Why the request was raised (e.g. 'non_revolution_region_detected')")
+    region: OutOfScopeRegion
+    hypothesis: List[str] = Field(
+        default_factory=list,
+        description="Candidate feature types in order of likelihood (e.g. ['transverse_hole', 'flat'])",
+    )
+    needs_tool: str = Field(..., description="Name of the tool / skill that would resolve the request")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Detector confidence in the hypothesis")
+
+
 class ShaftConstructionPlan(BaseModel):
     """Strict construction plan for shaft reverse engineering.
     
@@ -175,6 +233,8 @@ class ShaftConstructionPlan(BaseModel):
         features: List of local features (keyways, holes, etc.)
         fillets: List of fillet specifications
         chamfers: List of chamfer specifications
+        out_of_scope_regions: Bands flagged by the Spike Generator (Sprint 3)
+        skill_requests: Explicit tool-asks for the v2 swarm (Sprint 3)
         confidence: Overall detection confidence
         measurement_log: Audit trail of measurements
     """
@@ -184,6 +244,8 @@ class ShaftConstructionPlan(BaseModel):
     features: List[LocalFeatureSpec] = Field(default_factory=list)
     fillets: List[Dict[str, Any]] = Field(default_factory=list)
     chamfers: List[Dict[str, Any]] = Field(default_factory=list)
+    out_of_scope_regions: List[OutOfScopeRegion] = Field(default_factory=list)
+    skill_requests: List[SkillRequest] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     measurement_log: List[MeasurementLogEntry] = Field(default_factory=list)
     
