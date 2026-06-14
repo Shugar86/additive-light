@@ -1,31 +1,66 @@
 # Contributing to additive-light
 
-> This project is a personal R&D / deeptech artefact built around a deterministic reverse-engineering pipeline. Contributions are welcome, but the codebase values small, focused changes over large refactorings.
+Thanks for taking the time to contribute. This project is a personal R&D / deeptech artefact built around a deterministic reverse-engineering pipeline. We value small, focused changes over large refactorings.
 
 ## How to contribute
 
 1. **Open an issue first** for anything bigger than a typo or a one-line fix — especially if it touches `backend/pipeline/deterministic_shaft.py`, `backend/sensors/`, or `backend/core/state.py`.
-2. **Fork the repo** (or create a feature branch if you have write access):
+
+2. **Fork the repository** (or create a feature branch if you have write access):
+
    ```bash
-   git checkout -b feature/your-change
+   git checkout develop
+   git pull
+   git checkout -b feat/your-change
    ```
-3. **Make the smallest change that works.** Follow KISS, YAGNI, and the existing code style.
-4. **Add or update tests** for any non-trivial sensor, fitting, or pipeline change.
-5. **Run the fast acceptance suite before pushing:**
+
+3. **Set up the environment:**
+
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+4. **Make the smallest change that works.** Follow KISS, YAGNI, and the existing code style.
+
+5. **Add or update tests** for any non-trivial sensor, fitting, or pipeline change.
+
+6. **Run the fast acceptance suite before pushing:**
+
    ```bash
    pytest tests/test_revolution_baseline.py \
           tests/test_math_enhancements.py \
           tests/test_out_of_scope_detector.py -v
    ```
-6. **Open a PR** with a clear description of the change, the motivation, and the test results.
 
-## Style
+7. **Commit with a conventional commit message:**
+
+   ```bash
+   git commit -m "feat(sensors): add barrel zone fitting"
+   ```
+
+8. **Open a Pull Request** against `develop` with:
+   - a clear description of the change;
+   - the motivation and context;
+   - the test results.
+
+## Branch naming
+
+- `feat/<scope>-<what>` — new feature
+- `fix/<scope>-<what>` — bug fix
+- `docs/<what>` — documentation only
+- `test/<what>` — test changes
+- `chore/<what>` — maintenance
+
+## Style guide
 
 - Python 3.11+ with type hints everywhere.
 - Google-style docstrings for public functions and classes.
 - No bare `except:` — catch specific exceptions.
 - No LLM in the deterministic math path. Keep geometry code in `backend/sensors/` and `backend/pipeline/` free of model calls.
-- Conventional commits: `feat(scope):`, `fix(scope):`, `docs(scope):`, `test(scope):`, `chore(scope):`.
+- Use `pathlib.Path` for file paths.
+- Keep functions small and single-purpose.
 
 ## Security
 
@@ -36,9 +71,10 @@
 ## Definition of Done for a PR
 
 - [ ] Acceptance tests pass (or the PR explains why they are intentionally not run).
-- [ ] New logic has at least one success and one edge-case test.
+- [ ] New logic has at least one success test and one edge-case test.
 - [ ] No secrets or build artifacts (`__pycache__/`, `.env`) are committed.
-- [ ] README / AGENTS.md / docs are updated if the change affects usage, architecture, or agent rules.
+- [ ] `README.md`, `AGENTS.md`, or `docs/` are updated if the change affects usage, architecture, or agent rules.
+- [ ] Commit messages follow Conventional Commits.
 
 ## Questions?
 

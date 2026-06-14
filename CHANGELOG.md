@@ -8,14 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Vibe-first documentation pass: `README.md`, `AGENTS.md`, `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md`.
-- Project identity documents: `PROJECT.md`, `COCKPIT.md`, `SPOTLIGHT.md`, `STATE.md`.
+- Quality-gated, vibe-polished documentation: README hero, badges, architecture diagram, examples, and documentation map.
+- `CONTRIBUTING.md` branch-naming guide, setup steps, and expanded PR Definition of Done.
+- `AGENTS.md` machine-readable contract header, escalation rules, and cross-document links.
 
 ### Changed
-- `README.md` updated with badges, project structure, and links to governance docs.
-- License moved from "Internal Use Only" to Apache-2.0.
+- `README.md` rewritten for scanability: hero ASCII block, feature list, copy-paste quick start with virtual environment, structured project tree.
+- `AGENTS.md` tightened vibe statement (`professional — тихо делает свою работу`) and DoD.
+- `CHANGELOG.md` now follows Keep a Changelog with dated releases and compare links.
 
-## [0.4.0] — Sprint 0-4: Sber500 demo pack
+## [0.4.0] — 2026-05-12
 
 ### Added
 - End-to-end deterministic revolution-body pipeline (`backend/pipeline/deterministic_shaft.py`).
@@ -32,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic arc-gap fitting for conical shafts.
 - PCA-degenerate alignment via RANSAC refinement.
 
-## [0.3.0] — Deterministic revolution bodies (Phase 0-5)
+## [0.3.0] — 2026-03-22
 
 ### Added
 - Deterministic fitting for cylinder, cone, arc, and spline zones.
@@ -44,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Shifted hero path from LLM-driven swarm to deterministic sensors-first pipeline.
 
-## [0.2.0] — Shaft Reverse Engineering MVP
+## [0.2.0] — 2026-03-10
 
 ### Added
 - `backend/main.py` facade with `process_stl()` API.
@@ -56,10 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config/agents/*.yaml` and `config/swarm_policy.yaml`.
 - `OpenSCAD_AI/` GUI app and SCAD-AI bridge (experimental).
 
-## [0.1.0] — CAD swarm architecture
+## [0.1.0] — 2026-03-05
 
 ### Added
 - Policy-driven multi-agent contracts (`CADAgentSpec`, `SwarmPolicy`, `ExecutionPolicy`).
 - Skill Library scaffold (`backend/skills/skill_library.py`) for Voyager-style tool growth.
 - Local git pre-push hook (`.github/workflows/` and hook management).
 - Initial project structure, `requirements.txt`, and README.
+
+[Unreleased]: https://github.com/Shugar86/additive-light/compare/0.4.0...develop
+[0.4.0]: https://github.com/Shugar86/additive-light/compare/0.3.0...0.4.0
+[0.3.0]: https://github.com/Shugar86/additive-light/compare/0.2.0...0.3.0
+[0.2.0]: https://github.com/Shugar86/additive-light/compare/0.1.0...0.2.0
+[0.1.0]: https://github.com/Shugar86/additive-light/releases/tag/0.1.0
