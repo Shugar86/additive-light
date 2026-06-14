@@ -1,259 +1,153 @@
-# Generative Design Intelligence (GDI)
+# Additive Light · GDI
 
-**3D Scan → Parametric CAD → G-code**
+**Из текста и 3D-скана — в параметрическую модель, которую можно напечатать.**
 
-GDI is a neurosymbolic AI system that converts raw 3D scans (STL) into parametric CAD models using a hybrid approach: deterministic sensors (Python) for geometry analysis and LLMs (Claude/GPT-4) for high-level design decisions.
+Additive Light — это экспериментальная площадка для генеративного 3D-моделирования. Она объединяет два направления:
 
-## Architecture
+- **ADDITIVE_LAB** — клиентское веб-приложение: пишешь текстовый запрос, AI генерирует Python-код на SolidPython2, OpenSCAD WASM рендерит STL прямо в браузере.
+- **GDI (Generative Design Intelligence)** — Python-пайплайн: берёт STL-скан, анализирует геометрию датчиками, аппроксимирует зоны, собирает параметрическую CAD-модель и выводит G-code.
 
-```
-Raw Mesh (STL)
-    ↓
-Step 0: HumanAlign (base plane, center axis)
-    ↓
-Step 1: Sensor (Multi-axis Slicer)
-    ↓
-Step 2: Approximator (Vector Regression, RANSAC)
-    ↓
-Step 3: Synthesizer (LLM Orchestrator)
-    ↓
-Step 4: Judge (2-phase validation)
-    ↓
-Step 5: Optimizer (Parametrization)
-    ↓
-Step 6: CAM Postprocessor (FreeCAD Path)
-    ↓
-G-code (.nc) + STEP (.step) + Manifest
-```
+> Это R&D-репозиторий. Код рабочий, но часть решений — исследовательские. Если что-то непонятно, смотри `ARCHITECTURE.md`, `DEPLOY.md` и `ROADMAP.md`.
 
-## Project Structure
+## Что умеет
 
-```
-e:
-├── gdi_core/              # Core business logic (web-ready)
-│   ├── models/           # Pydantic YAML contract models
-│   ├── sensors/          # Multi-axis slicer
-│   ├── approximator/     # Zone detection with confidence
-│   ├── judge/            # 2-phase validation
-│   ├── synthesis/        # LLM orchestration
-│   ├── optimizer/        # Code beautification
-│   ├── cam/              # G-code generation
-│   ├── utils/            # Manifest & logging
-│   └── api.py            # Clean API boundary
-│
-├── gdi_app/              # Desktop applications
-│   ├── cli/              # Typer CLI interface
-│   └── gui/              # PyQt6 GUI
-│
-├── web/                  # Web application (Phase 2)
-│   ├── backend/          # FastAPI + Celery
-│   ├── frontend/         # React + Three.js
-│   └── sandbox/          # Docker sandbox for code execution
-│
-├── benchmark_kit/        # Test data
-│   ├── ideal/           # Perfect models
-│   ├── noise/           # Synthetic noise
-│   ├── corrupt/         # Manually damaged
-│   └── real_scans/      # Real scanner data
-│
-├── requirements.txt      # Dependencies
-└── README.md            # This file
-```
+### Веб-часть (ADDITIVE_LAB)
 
-## Installation
+- 🧠 Генерация SolidPython2-кода по текстовому промпту через OpenRouter (Gemini, Claude, Grok и другие coder-модели).
+- 🔒 Трёхуровневая валидация AI-кода: скобки, `compile()` в Pyodide, полный рендер в OpenSCAD.
+- 🖥️ Рендеринг OpenSCAD прямо в браузере через WASM + Web Worker — интерфейс не зависает.
+- 🎨 3D-просмотрщик на Three.js с орбитальной камерой, автоцентрированием и bounding box.
+- 💾 Скачивание `.scad` и `.stl` одним кликом.
+- 🏠 Local-first: тяжёлые файлы (`openscad.min.js`, `worker.js`, стили) отдаются локально.
 
-### Prerequisites
-- Python 3.11+
-- Redis (for web version)
-- Docker (for sandbox)
-- OpenSCAD (for dataset generation)
+### Десктоп / pipeline (GDI)
 
-### Desktop (Phase 1)
+- 📐 Мультиосевой слайсинг STL через Trimesh + Shapely.
+- 📊 RANSAC-аппроксимация зон с confidence-оценкой.
+- 🤖 LLM-оркестратор для принятия решений по геометрии.
+- ⚖️ Двухфазный Judge: синтаксис → IoU.
+- 🛠️ Параметризация и бьютификация CAD-кода.
+- 📁 YAML-контракт v1.0 между датчиками и LLM.
+- 🖨️ Экспорт G-code через FreeCAD Path.
+
+## Быстрый старт
+
+### Веб-версия (рекомендуется)
 
 ```bash
-# Install dependencies
+# 1. Перейти в папку проекта
+cd /home/shugar/dev/additive-light
+
+# 2. Запустить локальный сервер (Python 3.10+)
+python server.py
+
+# 3. Открыть в браузере
+open http://localhost:8001
+```
+
+> Для Windows есть `start-server.bat`.
+> Для корректной работы WASM сервер проставляет заголовки `COOP: same-origin` и `COEP: require-corp`. Подробнее — в `DEPLOY.md`.
+
+### Десктоп-версия OpenSCAD AI
+
+```bash
+# Установить зависимости
 pip install -r requirements.txt
 
-# Run CLI
+# Запустить GUI
+python launch_gui.py
+# или
+python -m gdi_app.gui.main_window
+```
+
+> Для Windows есть `start-desktop.bat`.
+
+### GDI pipeline (CLI)
+
+```bash
+pip install -r requirements.txt
+
 cd gdi_app/cli
 python -m main process /path/to/file.stl --output output/
-
-# Or run GUI
-cd gdi_app/gui
-python -m main_window
 ```
 
-### Web (Phase 2)
+## Архитектура / стек
 
-```bash
-cd web
+| Область | Технологии |
+|---------|------------|
+| Веб-фронтенд | Vanilla JS, HTML5/CSS3, CodeMirror, Three.js |
+| Браузерный Python | Pyodide (WebAssembly), SolidPython2 (`solid2`) |
+| CAD-ядро | OpenSCAD WASM |
+| AI | OpenRouter API |
+| Desktop / pipeline | Python 3.11+, Trimesh, Shapely, Pydantic, LangGraph, Typer, PyQt6 |
+| Web backend | FastAPI, Celery, Redis, S3 (Phase 2) |
+| Тесты | pytest |
 
-# Start services
-docker-compose up -d
+## Структура проекта
 
-# API: http://localhost:8000
-# Frontend: http://localhost:3000
+```text
+additive-light/
+├── index.html              # Главная страница веб-приложения
+├── script.js               # Основная логика: UI, Pyodide, AI, Three.js
+├── worker.js               # Web Worker для OpenSCAD WASM
+├── style.css / style_new.css  # Стили
+├── server.py               # Локальный dev-сервер с правильными заголовками
+├── openscad.min.js         # JS-обёртка OpenSCAD WASM
+├── requirements.txt        # Python-зависимости
+│
+├── OpenSCAD_AI/            # Десктопный GUI-ассистент (Python)
+├── gdi_core/               # Ядро пайплайна GDI
+├── gdi_app/                # CLI и GUI для GDI
+├── web/                    # Web backend/frontend (Phase 2)
+├── benchmark_kit/          # Тестовые STL: ideal / noise / corrupt / real_scans
+├── tests/                  # Юнит- и интеграционные тесты
+│
+├── ARCHITECTURE.md         # Подробная архитектура
+├── DEPLOY.md               # Как выложить в прод
+├── ROADMAP.md              # Планы и UX-долги
+├── CHANGELOG.md            # История изменений
+├── CONTRIBUTING.md         # Как участвовать
+└── LICENSE                 # MIT
 ```
 
-## Usage
+## Примеры
 
-### CLI
+### Веб: ваза из текста
 
-```bash
-# Process single file
-gdi process model.stl --axis Z --confidence 0.7
+1. Открой `http://localhost:8001`.
+2. В поле запроса напиши: `Ваза с витой геометрией, высота 100 мм`.
+3. Нажми **Сгенерировать**, затем **Скомпилировать**.
+4. Когда модель появится в 3D-вьювере, скачай `.scad` или `.stl`.
 
-# Batch processing
-gdi batch ./models/ --pattern "*.stl"
-
-# Validate YAML
-gdi validate output/model_telemetry.yaml
-
-# System info
-gdi info
-```
-
-### Python API
+### GDI: анализ скана
 
 ```python
 from gdi_core import GDIAPI
 
-api = GDIAPI(
-    slice_step=0.1,
-    confidence_threshold=0.7
-)
+api = GDIAPI(slice_step=0.1, confidence_threshold=0.7)
+manifest = api.run_pipeline(stl_file="model.stl", base_axis="Z")
 
-# Run complete pipeline
-manifest = api.run_pipeline(
-    stl_file="model.stl",
-    base_axis="Z"
-)
-
-print(f"Status: {manifest.status}")
-print(f"Confidence: {manifest.approximation_result.global_confidence}")
-print(f"Zones: {len(manifest.approximation_result.telemetry.topological_zones)}")
+print(manifest.status)
+print(manifest.approximation_result.global_confidence)
 ```
 
-### Web API
+## Разработка
 
 ```bash
-# Upload file
-curl -X POST -F "file=@model.stl" http://localhost:8000/api/v1/upload
-
-# Create job
-curl -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"source_stl": "uploads/...stl", "base_axis": "Z"}'
-
-# Check status
-curl http://localhost:8000/api/v1/jobs/{job_id}
-
-# WebSocket for real-time updates
-wscat -c ws://localhost:8000/ws/jobs/{job_id}
-```
-
-## Features
-
-### Phase 1 (Desktop MVP) - COMPLETE
-
-- [x] **Sensor**: Multi-axis slicing with Trimesh + Shapely
-- [x] **Approximator**: RANSAC-based zone detection with confidence scoring
-- [x] **YAML Contract**: Strict pydantic schema v1.0
-- [x] **Judge**: 2-phase validation (syntax → IoU)
-- [x] **Optimizer**: Code parametrization and beautification
-- [x] **Run Manifest**: Full traceability (run_id, versions, IoU, errors)
-- [x] **CLI**: Typer interface for batch processing
-- [x] **GUI**: PyQt6 minimal interface
-- [x] **CAM**: G-code export (FreeCAD integration)
-- [x] **Benchmark Kit**: 8-12 STL with expected results
-
-### Phase 2 (Web) - IMPLEMENTED
-
-- [x] **FastAPI**: REST API with async support
-- [x] **Celery + Redis**: Background task queue
-- [x] **S3 Storage**: File upload/download
-- [x] **WebSocket**: Real-time progress updates
-- [x] **React + Three.js**: 3D web viewer
-- [x] **Docker Sandbox**: Isolated code execution
-- [x] **Scalable**: Horizontal worker scaling
-
-## YAML Contract v1.0
-
-The communication protocol between sensors and LLM:
-
-```yaml
-Global_State:
-  target_action: "Generate parametric B-Rep code"
-  target_library: "build123d"
-  base_axis: "Z"
-  total_height: 40.0
-  yaml_version: "1.0"
-
-Topological_Zones:
-  - zone_id: 1
-    span_z: [0.0, 40.0]
-    geometry: "Constant_Profile"
-    cross_section: "Circle"
-    parameters:
-      radius: 20.0
-    sensor_hint: "Stable RANSAC fit. Probably a base cylinder..."
-    confidence: 0.95
-
-Agent_Task:
-  rules:
-    - "Do not use visual assumptions..."
-    - "Use 'with BuildPart():' context managers..."
-  thought_process: "..."
-  code_output: "..."
-```
-
-## Benchmark Kit
-
-Expected results for regression testing:
-
-| Model | Type | Min IoU | Confidence |
-|-------|------|---------|------------|
-| ideal_cylinder | Perfect | 0.99 | 0.95 |
-| noise_cylinder | Noisy | 0.96 | 0.80 |
-| corrupt_cylinder | Damaged | 0.80 | 0.40 |
-| real_scan_1 | Raw scan | 0.85 | 0.60 |
-
-## Development
-
-### Testing
-
-```bash
-# Run tests
+# Тесты
 pytest tests/ -v
 
-# Run on benchmark
-python -m pytest tests/test_benchmark.py --benchmark
-```
-
-### Code Style
-
-```bash
-# Format code
+# Форматирование
 black gdi_core/ gdi_app/ web/
 
-# Type check
+# Типизация
 mypy gdi_core/
 ```
 
-## License
+## Лицензия
 
-MIT License - See LICENSE file
+[MIT](./LICENSE) © Shugar86.
 
-## Contributing
+## Участие
 
-1. Fork the repository
-2. Create a feature branch
-3. Follow the VibeCraft Engineering Rules (see `.cursor/rules/`)
-4. Submit a pull request
-
-## Acknowledgments
-
-- build123d / OCP (OpenCASCADE) for CAD operations
-- Trimesh for mesh processing
-- LangGraph for LLM orchestration
-- FastAPI for web framework
+См. [CONTRIBUTING.md](./CONTRIBUTING.md). Проект исследовательский — идеи и PR приветствуются, но сначала лучше обсудить в issues.
